@@ -1,0 +1,553 @@
+
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+.wf{width:100%;max-width:900px;margin:0 auto;padding:1rem 0}
+.tabs{display:flex;gap:4px;padding:0 0 1rem;border-bottom:0.5px solid var(--color-border-tertiary);margin-bottom:1.5rem;flex-wrap:wrap}
+.tab{padding:6px 13px;font-size:12px;border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);background:transparent;color:var(--color-text-secondary);cursor:pointer;transition:all .15s;font-family:var(--font-sans)}
+.tab.active{background:var(--color-text-primary);color:var(--color-background-primary);border-color:var(--color-text-primary)}
+.tab.new-tab{border-color:#5DCAA5;color:#0F6E56}
+.tab.new-tab.active{background:#1D9E75;color:#E1F5EE;border-color:#1D9E75}
+.screen{display:none}
+.screen.active{display:block}
+
+.navbar{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);background:var(--color-background-primary);margin-bottom:12px}
+.logo{font-size:15px;font-weight:500;color:var(--color-text-primary)}
+.logo span{color:#1D9E75}
+.nav-links{display:flex;gap:16px;font-size:12px;color:var(--color-text-secondary)}
+.nav-links .al{color:var(--color-text-primary);font-weight:500}
+.nav-right{display:flex;align-items:center;gap:8px}
+.nav-badge{font-size:11px;padding:3px 8px;border-radius:var(--border-radius-md);border:0.5px solid var(--color-border-tertiary);color:var(--color-text-secondary)}
+.nav-btn{font-size:11px;padding:4px 10px;border-radius:var(--border-radius-md);background:var(--color-text-primary);color:var(--color-background-primary);border:none;cursor:pointer}
+
+.two-col{display:grid;grid-template-columns:280px minmax(0,1fr);gap:12px;align-items:start}
+.two-thirds{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:12px;align-items:start}
+.three-col{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+
+.card{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:14px}
+.sl{font-size:10px;font-weight:500;color:var(--color-text-tertiary);letter-spacing:.06em;text-transform:uppercase;margin-bottom:8px}
+.fl{font-size:11px;color:var(--color-text-secondary);margin-bottom:4px}
+.im{height:32px;border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);background:var(--color-background-secondary);display:flex;align-items:center;padding:0 10px;font-size:12px;color:var(--color-text-tertiary)}
+.tam{height:64px;border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);background:var(--color-background-secondary);padding:8px 10px;font-size:12px;color:var(--color-text-tertiary)}
+.btn-p{padding:7px 14px;background:#1D9E75;color:#E1F5EE;border:none;border-radius:var(--border-radius-md);font-size:12px;cursor:pointer;font-family:var(--font-sans)}
+.btn-s{padding:7px 14px;background:transparent;color:var(--color-text-secondary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);font-size:12px;cursor:pointer;font-family:var(--font-sans)}
+.brow{display:flex;gap:8px;margin-top:10px}
+
+.chip{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:20px;font-size:11px;border:0.5px solid var(--color-border-tertiary);color:var(--color-text-secondary);background:var(--color-background-secondary)}
+.chip.green{background:#E1F5EE;color:#0F6E56;border-color:#5DCAA5}
+.chip.blue{background:#E6F1FB;color:#185FA5;border-color:#85B7EB}
+.chip.amber{background:#FAEEDA;color:#854F0B;border-color:#EF9F27}
+.chip.purple{background:#EEEDFE;color:#3C3489;border-color:#AFA9EC}
+
+.ann{font-size:10px;color:var(--color-text-tertiary);display:flex;align-items:center;gap:4px;margin-top:6px}
+
+.map-mock{border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);background:var(--color-background-secondary);position:relative;overflow:hidden;height:300px;display:flex;align-items:center;justify-content:center}
+.map-grid{position:absolute;inset:0;opacity:.4;background-image:linear-gradient(var(--color-border-tertiary) 1px,transparent 1px),linear-gradient(90deg,var(--color-border-tertiary) 1px,transparent 1px);background-size:40px 40px}
+.map-radius{position:absolute;width:160px;height:160px;border-radius:50%;border:1.5px dashed #1D9E75;top:50%;left:50%;transform:translate(-50%,-50%);opacity:.5}
+.map-marker{position:absolute;width:8px;height:8px;border-radius:50%;background:#1D9E75}
+.map-pin{width:28px;height:28px;border-radius:50%;background:#1D9E75;margin:0 auto 6px;display:flex;align-items:center;justify-content:center;color:#E1F5EE;font-size:14px}
+.map-center{position:relative;z-index:2;text-align:center}
+
+.ir{display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:0.5px solid var(--color-border-tertiary);font-size:12px}
+.ir:last-child{border-bottom:none}
+.iw{font-size:10px;color:#1D9E75;margin-left:4px}
+.zb{padding:4px 10px;border-radius:var(--border-radius-md);font-size:11px;font-weight:500;background:#E1F5EE;color:#0F6E56;display:inline-block;margin-bottom:8px}
+
+.wb{background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:10px 12px;margin-bottom:10px;display:flex;align-items:flex-start;gap:10px}
+.wt{font-size:11px;color:var(--color-text-secondary);line-height:1.5}
+.wm{font-size:15px;font-weight:500;color:var(--color-text-primary);margin-bottom:2px}
+
+.mg{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
+.mc{background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:10px;text-align:center}
+.mv{font-size:20px;font-weight:500;color:var(--color-text-primary)}
+.ml{font-size:10px;color:var(--color-text-secondary);margin-top:2px}
+.ms{font-size:11px;color:#1D9E75;margin-top:1px}
+
+.sr{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.sn{font-size:11px;color:var(--color-text-secondary);width:60px;flex-shrink:0}
+.st{flex:1;height:4px;background:var(--color-background-secondary);border-radius:2px;position:relative;border:0.5px solid var(--color-border-tertiary)}
+.sf{height:4px;border-radius:2px;background:#1D9E75}
+.sh{width:12px;height:12px;border-radius:50%;background:#1D9E75;position:absolute;top:-4px;transform:translateX(-50%);border:2px solid var(--color-background-primary)}
+.sv{font-size:11px;font-weight:500;color:var(--color-text-primary);width:44px;text-align:right;flex-shrink:0}
+
+.bw{margin-bottom:12px}
+.bt{display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px}
+.bb{height:8px;border-radius:4px;background:var(--color-background-secondary)}
+.bf{height:8px;border-radius:4px;background:#1D9E75}
+
+.ca{border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);height:140px;background:var(--color-background-secondary);display:flex;align-items:flex-end;padding:12px 12px 28px;gap:8px;position:relative}
+.cb{flex:1;border-radius:3px 3px 0 0;background:#9FE1CB;position:relative;min-height:8px}
+.cb.hl{background:#1D9E75}
+.cx{position:absolute;bottom:-18px;left:50%;transform:translateX(-50%);font-size:9px;color:var(--color-text-tertiary);white-space:nowrap}
+
+.ci{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:0.5px solid var(--color-border-tertiary)}
+.ci:last-child{border-bottom:none}
+.cr{width:20px;font-size:12px;font-weight:500;color:var(--color-text-tertiary);flex-shrink:0}
+.cr.r1{color:#1D9E75}
+.cf{flex:1}
+.cn{font-size:12px;font-weight:500;color:var(--color-text-primary)}
+.cc{font-size:10px;color:var(--color-text-secondary)}
+.cam{font-size:13px;font-weight:500;color:#1D9E75;white-space:nowrap}
+.csb{font-size:10px;color:var(--color-text-tertiary)}
+
+.pi{padding:10px 0;border-bottom:0.5px solid var(--color-border-tertiary)}
+.pi:last-child{border-bottom:none}
+.pt{font-size:13px;font-weight:500;color:var(--color-text-primary);margin-bottom:3px}
+.pm{font-size:10px;color:var(--color-text-tertiary);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.ptg{padding:1px 6px;border-radius:var(--border-radius-md);font-size:10px;background:#E1F5EE;color:#0F6E56}
+.pv{font-size:11px;color:var(--color-text-secondary);margin-top:3px;line-height:1.5}
+
+.ph{display:flex;align-items:center;gap:14px;padding-bottom:14px;border-bottom:0.5px solid var(--color-border-tertiary);margin-bottom:14px}
+.av{width:56px;height:56px;border-radius:50%;background:#E1F5EE;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:500;color:#1D9E75;flex-shrink:0}
+.pna{font-size:15px;font-weight:500;color:var(--color-text-primary)}
+.psu{font-size:12px;color:var(--color-text-secondary);margin-top:2px}
+.pad{font-size:11px;color:#1D9E75;margin-top:3px}
+
+.ic{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:0.5px solid var(--color-border-tertiary);font-size:12px}
+.ic:last-child{border-bottom:none}
+.ck{width:16px;height:16px;border-radius:4px;background:#1D9E75;display:flex;align-items:center;justify-content:center;font-size:9px;color:#fff}
+.ck.off{background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary)}
+
+.as{display:flex;align-items:center;gap:6px;font-size:10px;color:#1D9E75;padding:6px 10px;border-radius:var(--border-radius-md);border:0.5px solid #5DCAA5;background:#E1F5EE;margin-top:8px}
+
+/* ---- receipt scanner specific ---- */
+.upload-zone{border:1.5px dashed var(--color-border-secondary);border-radius:var(--border-radius-lg);padding:28px 20px;text-align:center;background:var(--color-background-secondary);cursor:pointer}
+.upload-icon{font-size:32px;color:var(--color-text-tertiary);margin-bottom:8px}
+.upload-title{font-size:14px;font-weight:500;color:var(--color-text-primary);margin-bottom:4px}
+.upload-sub{font-size:11px;color:var(--color-text-secondary);line-height:1.6}
+.upload-badge{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:var(--border-radius-md);font-size:11px;background:#EEEDFE;color:#3C3489;border:0.5px solid #AFA9EC;margin-top:8px}
+
+.receipt-preview{border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);overflow:hidden;margin-bottom:10px}
+.receipt-img{width:100%;height:120px;background:var(--color-background-secondary);display:flex;align-items:center;justify-content:center;position:relative}
+.receipt-lines{position:absolute;inset:12px;display:flex;flex-direction:column;gap:5px;justify-content:center}
+.rline{height:6px;border-radius:2px;background:var(--color-border-secondary)}
+.receipt-label{font-size:10px;color:var(--color-text-tertiary);padding:6px 10px;border-top:0.5px solid var(--color-border-tertiary);display:flex;align-items:center;gap:4px;background:var(--color-background-primary)}
+
+.parse-arrow{display:flex;align-items:center;justify-content:center;padding:8px 0;gap:8px}
+.arrow-line{flex:1;height:0.5px;background:var(--color-border-secondary)}
+.arrow-badge{font-size:10px;padding:3px 10px;border-radius:20px;background:#EEEDFE;color:#3C3489;border:0.5px solid #AFA9EC;white-space:nowrap}
+
+.parsed-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:0.5px solid var(--color-border-tertiary)}
+.parsed-row:last-child{border-bottom:none}
+.parsed-cat{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--color-text-primary)}
+.parsed-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.parsed-amt{font-size:12px;font-weight:500;color:var(--color-text-primary)}
+.parsed-conf{font-size:10px;color:#1D9E75}
+
+.step-flow{display:flex;align-items:flex-start;gap:0;margin-bottom:16px}
+.step-node{display:flex;flex-direction:column;align-items:center;flex:1}
+.step-circle{width:32px;height:32px;border-radius:50%;background:#E1F5EE;border:1.5px solid #5DCAA5;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:500;color:#0F6E56;flex-shrink:0}
+.step-circle.active{background:#1D9E75;border-color:#1D9E75;color:#E1F5EE}
+.step-label{font-size:10px;color:var(--color-text-secondary);text-align:center;margin-top:5px;max-width:70px;line-height:1.4}
+.step-connector{flex:1;height:1.5px;background:var(--color-border-secondary);margin-top:16px;min-width:12px}
+.step-connector.done{background:#5DCAA5}
+
+.confirm-banner{background:#E1F5EE;border:0.5px solid #5DCAA5;border-radius:var(--border-radius-md);padding:10px 12px;display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.cb-icon{font-size:18px;color:#1D9E75;flex-shrink:0}
+.cb-text{font-size:11px;color:#085041;line-height:1.5}
+.cb-strong{font-size:12px;font-weight:500;color:#0F6E56}
+
+.edit-tag{font-size:10px;padding:2px 6px;border-radius:var(--border-radius-md);background:var(--color-background-secondary);color:var(--color-text-secondary);border:0.5px solid var(--color-border-tertiary);cursor:pointer;margin-left:4px}
+</style>
+
+<h2 class="sr-only">슬픽 서비스 전체 화면 와이어프레임 — 맵, 영수증 AI 분석(신규), 대시보드, 커뮤니티, 프로필</h2>
+
+<div class="wf">
+  <div class="tabs">
+    <button class="tab active" onclick="show('map',this)"><i class="ti ti-map-2" aria-hidden="true"></i> 슬세권 맵</button>
+    <button class="tab new-tab active-new" onclick="show('receipt',this)"><i class="ti ti-scan" aria-hidden="true"></i> 영수증 AI 분석 <span style="font-size:9px;background:#1D9E75;color:#E1F5EE;padding:1px 5px;border-radius:8px;margin-left:2px">NEW</span></button>
+    <button class="tab" onclick="show('dash',this)"><i class="ti ti-chart-bar" aria-hidden="true"></i> 카드 랭킹 대시보드</button>
+    <button class="tab" onclick="show('community',this)"><i class="ti ti-message-circle" aria-hidden="true"></i> 동네 커뮤니티</button>
+    <button class="tab" onclick="show('profile',this)"><i class="ti ti-user" aria-hidden="true"></i> 프로필</button>
+  </div>
+
+  <!-- MAP PAGE -->
+  <div class="screen active" id="s-map">
+    <div class="navbar">
+      <div class="logo">슬<span>픽</span></div>
+      <div class="nav-links"><span class="al">슬세권 맵</span><span>영수증 분석</span><span>카드 랭킹</span><span>커뮤니티</span></div>
+      <div class="nav-right"><span class="nav-badge"><i class="ti ti-moon" aria-hidden="true"></i></span><button class="nav-btn">로그인</button></div>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
+      <div class="im" style="flex:1"><i class="ti ti-search" style="font-size:13px;margin-right:6px" aria-hidden="true"></i>주소 검색 (예: 서울 강남구 역삼동)</div>
+      <button class="btn-p" style="white-space:nowrap"><i class="ti ti-current-location" aria-hidden="true"></i> 이 지역 검색</button>
+    </div>
+    <div class="two-col">
+      <div>
+        <div class="card" style="margin-bottom:10px">
+          <div class="sl">날씨 AI 큐레이션</div>
+          <div class="wb">
+            <div style="font-size:22px;flex-shrink:0"><i class="ti ti-sun" aria-hidden="true"></i></div>
+            <div><div class="wm">32.5°C · 맑음</div><div class="wt">역삼동 주변 카페 7곳 밀집 — <strong style="color:#0F6E56">신한 딥드림</strong>으로 아이스 아메리카노 할인 추천!</div></div>
+          </div>
+          <div class="ann"><i class="ti ti-robot"></i> GPT-4o 실시간 생성</div>
+        </div>
+        <div class="card">
+          <div class="sl">상권 분석 요약</div>
+          <div class="zb">1인 가구 주거 상권</div>
+          <div style="margin-bottom:10px">
+            <div class="ir"><span style="color:var(--color-text-secondary)">편의점 (CS2)</span><span style="font-weight:500;color:var(--color-text-primary)">12곳<span class="iw">도보 2분</span></span></div>
+            <div class="ir"><span style="color:var(--color-text-secondary)">프랜차이즈 카페 (CE7)</span><span style="font-weight:500;color:var(--color-text-primary)">8곳<span class="iw">도보 4분</span></span></div>
+            <div class="ir"><span style="color:var(--color-text-secondary)">대형마트 (MT1)</span><span style="font-weight:500;color:var(--color-text-primary)">1곳<span class="iw">도보 9분</span></span></div>
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+            <span class="chip green"><i class="ti ti-building-store" style="font-size:11px" aria-hidden="true"></i>편의점 밀집</span>
+            <span class="chip blue"><i class="ti ti-coffee" style="font-size:11px" aria-hidden="true"></i>카페 풍부</span>
+          </div>
+          <button class="btn-p" style="width:100%;font-size:12px"><i class="ti ti-rocket" aria-hidden="true"></i> 카드 시뮬레이션 시작</button>
+        </div>
+      </div>
+      <div>
+        <div class="map-mock">
+          <div class="map-grid"></div>
+          <div class="map-radius"></div>
+          <div class="map-marker" style="top:35%;left:55%"></div>
+          <div class="map-marker" style="top:55%;left:38%"></div>
+          <div class="map-marker" style="top:40%;left:42%"></div>
+          <div class="map-marker" style="top:60%;left:60%;background:#185FA5"></div>
+          <div class="map-marker" style="top:44%;left:65%;background:#185FA5"></div>
+          <div class="map-marker" style="top:30%;left:50%;background:#EF9F27"></div>
+          <div class="map-center"><div class="map-pin"><i class="ti ti-map-pin" style="font-size:14px" aria-hidden="true"></i></div><div style="font-size:11px;color:var(--color-text-secondary);background:var(--color-background-primary);padding:2px 8px;border-radius:var(--border-radius-md);border:0.5px solid var(--color-border-tertiary)">역삼동 중심</div></div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+          <span class="chip green"><span style="width:7px;height:7px;border-radius:50%;background:#1D9E75;display:inline-block"></span>편의점</span>
+          <span class="chip blue"><span style="width:7px;height:7px;border-radius:50%;background:#185FA5;display:inline-block"></span>카페</span>
+          <span class="chip amber"><span style="width:7px;height:7px;border-radius:50%;background:#EF9F27;display:inline-block"></span>마트</span>
+        </div>
+        <div class="ann"><i class="ti ti-api"></i>Kakao 로컬 API 실시간 호출</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RECEIPT AI PAGE (NEW) -->
+  <div class="screen" id="s-receipt">
+    <div class="navbar">
+      <div class="logo">슬<span>픽</span></div>
+      <div class="nav-links"><span>슬세권 맵</span><span class="al">영수증 분석</span><span>카드 랭킹</span><span>커뮤니티</span></div>
+      <div class="nav-right"><span class="nav-badge"><i class="ti ti-moon" aria-hidden="true"></i></span><button class="nav-btn">프로필</button></div>
+    </div>
+
+    <div style="margin-bottom:14px">
+      <div class="step-flow">
+        <div class="step-node">
+          <div class="step-circle active">1</div>
+          <div class="step-label">이미지 업로드</div>
+        </div>
+        <div class="step-connector done"></div>
+        <div class="step-node">
+          <div class="step-circle active">2</div>
+          <div class="step-label">AI 소비 파싱</div>
+        </div>
+        <div class="step-connector done"></div>
+        <div class="step-node">
+          <div class="step-circle active">3</div>
+          <div class="step-label">결과 확인 · 수정</div>
+        </div>
+        <div class="step-connector"></div>
+        <div class="step-node">
+          <div class="step-circle">4</div>
+          <div class="step-label">카드 추천 바로가기</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="two-thirds">
+      <div>
+        <div class="card" style="margin-bottom:12px">
+          <div class="sl">소비 내역 이미지 업로드</div>
+          <div class="upload-zone">
+            <div class="upload-icon"><i class="ti ti-photo-scan" aria-hidden="true"></i></div>
+            <div class="upload-title">영수증 또는 소비 내역 캡처본을 올려주세요</div>
+            <div class="upload-sub">카드사 앱 월간 리포트, 가계부 앱 화면,<br>종이 영수증 사진 모두 가능합니다</div>
+            <div style="margin-top:10px;display:flex;gap:6px;justify-content:center;flex-wrap:wrap">
+              <span class="upload-badge"><i class="ti ti-sparkles" style="font-size:12px" aria-hidden="true"></i>GPT-4o Vision</span>
+              <span class="chip" style="font-size:11px">JPG · PNG · HEIC 지원</span>
+            </div>
+            <div style="margin-top:12px;display:flex;gap:8px;justify-content:center">
+              <button class="btn-p"><i class="ti ti-upload" aria-hidden="true"></i> 파일 선택</button>
+              <button class="btn-s"><i class="ti ti-camera" aria-hidden="true"></i> 직접 촬영</button>
+            </div>
+          </div>
+          <div class="ann"><i class="ti ti-lock"></i>이미지는 파싱 후 즉시 삭제되며 서버에 저장되지 않습니다</div>
+        </div>
+
+        <div class="card" style="margin-bottom:12px">
+          <div class="sl">업로드된 이미지</div>
+          <div class="receipt-preview">
+            <div class="receipt-img">
+              <div class="receipt-lines">
+                <div class="rline" style="width:60%"></div>
+                <div class="rline" style="width:80%"></div>
+                <div class="rline" style="width:45%"></div>
+                <div class="rline" style="width:70%"></div>
+                <div class="rline" style="width:55%"></div>
+                <div class="rline" style="width:80%"></div>
+                <div class="rline" style="width:40%"></div>
+              </div>
+            </div>
+            <div class="receipt-label"><i class="ti ti-file-text" style="font-size:12px" aria-hidden="true"></i>카드사_12월_소비리포트.png · 1.2MB</div>
+          </div>
+
+          <div class="parse-arrow">
+            <div class="arrow-line"></div>
+            <div class="arrow-badge"><i class="ti ti-sparkles" style="font-size:11px" aria-hidden="true"></i> GPT-4o 이미지 분석 중...</div>
+            <div class="arrow-line"></div>
+          </div>
+          <div class="ann" style="justify-content:center"><i class="ti ti-robot"></i>Django → Multimodal API 호출 → JSON 파싱</div>
+        </div>
+
+        <div class="card">
+          <div class="sl">AI 파싱 결과 확인 및 수정</div>
+          <div class="confirm-banner">
+            <div class="cb-icon"><i class="ti ti-check" aria-hidden="true"></i></div>
+            <div><div class="cb-strong">소비 내역 분석 완료</div><div class="cb-text">5개 카테고리에서 총 476,000원의 소비가 확인되었습니다. 수정이 필요하면 항목을 직접 편집하세요.</div></div>
+          </div>
+
+          <div style="margin-bottom:8px">
+            <div class="parsed-row">
+              <div class="parsed-cat"><div class="parsed-dot" style="background:#1D9E75"></div>카페 · 음료</div>
+              <div style="display:flex;align-items:center;gap:6px">
+                <div class="parsed-amt">102,000원</div>
+                <div class="parsed-conf">신뢰도 98%</div>
+                <span class="edit-tag"><i class="ti ti-edit" style="font-size:10px" aria-hidden="true"></i></span>
+              </div>
+            </div>
+            <div class="parsed-row">
+              <div class="parsed-cat"><div class="parsed-dot" style="background:#185FA5"></div>편의점</div>
+              <div style="display:flex;align-items:center;gap:6px">
+                <div class="parsed-amt">58,000원</div>
+                <div class="parsed-conf">신뢰도 95%</div>
+                <span class="edit-tag"><i class="ti ti-edit" style="font-size:10px" aria-hidden="true"></i></span>
+              </div>
+            </div>
+            <div class="parsed-row">
+              <div class="parsed-cat"><div class="parsed-dot" style="background:#EF9F27"></div>음식점 · 배달</div>
+              <div style="display:flex;align-items:center;gap:6px">
+                <div class="parsed-amt">183,000원</div>
+                <div class="parsed-conf">신뢰도 91%</div>
+                <span class="edit-tag"><i class="ti ti-edit" style="font-size:10px" aria-hidden="true"></i></span>
+              </div>
+            </div>
+            <div class="parsed-row">
+              <div class="parsed-cat"><div class="parsed-dot" style="background:#7F77DD"></div>대형마트</div>
+              <div style="display:flex;align-items:center;gap:6px">
+                <div class="parsed-amt">89,000원</div>
+                <div class="parsed-conf">신뢰도 97%</div>
+                <span class="edit-tag"><i class="ti ti-edit" style="font-size:10px" aria-hidden="true"></i></span>
+              </div>
+            </div>
+            <div class="parsed-row">
+              <div class="parsed-cat"><div class="parsed-dot" style="background:#B4B2A9"></div>기타</div>
+              <div style="display:flex;align-items:center;gap:6px">
+                <div class="parsed-amt">44,000원</div>
+                <div class="parsed-conf">신뢰도 82%</div>
+                <span class="edit-tag"><i class="ti ti-edit" style="font-size:10px" aria-hidden="true"></i></span>
+              </div>
+            </div>
+          </div>
+          <div class="brow">
+            <button class="btn-p" style="flex:1"><i class="ti ti-rocket" aria-hidden="true"></i> 이 데이터로 카드 추천 받기</button>
+            <button class="btn-s"><i class="ti ti-refresh" aria-hidden="true"></i> 재업로드</button>
+          </div>
+          <div class="ann"><i class="ti ti-arrow-right"></i>대시보드 슬라이더에 자동 입력 후 Seul-Score 즉시 산출</div>
+        </div>
+      </div>
+
+      <div>
+        <div class="card" style="margin-bottom:10px">
+          <div class="sl">지원 이미지 유형</div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <div style="display:flex;align-items:flex-start;gap:8px;padding:8px;border-radius:var(--border-radius-md);border:0.5px solid var(--color-border-tertiary)">
+              <i class="ti ti-device-mobile" style="font-size:18px;color:#1D9E75;margin-top:1px;flex-shrink:0" aria-hidden="true"></i>
+              <div><div style="font-size:12px;font-weight:500;color:var(--color-text-primary)">카드사 앱 리포트</div><div style="font-size:10px;color:var(--color-text-secondary)">삼성·신한·KB·현대 앱 월간 소비 화면</div></div>
+            </div>
+            <div style="display:flex;align-items:flex-start;gap:8px;padding:8px;border-radius:var(--border-radius-md);border:0.5px solid var(--color-border-tertiary)">
+              <i class="ti ti-book" style="font-size:18px;color:#185FA5;margin-top:1px;flex-shrink:0" aria-hidden="true"></i>
+              <div><div style="font-size:12px;font-weight:500;color:var(--color-text-primary)">가계부 앱 화면</div><div style="font-size:10px;color:var(--color-text-secondary)">뱅크샐러드, 토스, 머니매니저 등 캡처</div></div>
+            </div>
+            <div style="display:flex;align-items:flex-start;gap:8px;padding:8px;border-radius:var(--border-radius-md);border:0.5px solid var(--color-border-tertiary)">
+              <i class="ti ti-receipt" style="font-size:18px;color:#854F0B;margin-top:1px;flex-shrink:0" aria-hidden="true"></i>
+              <div><div style="font-size:12px;font-weight:500;color:var(--color-text-primary)">종이 영수증 사진</div><div style="font-size:10px;color:var(--color-text-secondary)">여러 장 한 번에 촬영한 이미지도 가능</div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-bottom:10px;background:var(--color-background-secondary)">
+          <div class="sl" style="color:#3C3489">AI 처리 흐름</div>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <div style="font-size:11px;color:var(--color-text-secondary);display:flex;align-items:flex-start;gap:6px;padding:6px;background:var(--color-background-primary);border-radius:var(--border-radius-md);border:0.5px solid var(--color-border-tertiary)">
+              <span style="color:#3C3489;font-weight:500;flex-shrink:0">①</span>Vue3에서 이미지 업로드 → Django로 전송
+            </div>
+            <div style="font-size:11px;color:var(--color-text-secondary);display:flex;align-items:flex-start;gap:6px;padding:6px;background:var(--color-background-primary);border-radius:var(--border-radius-md);border:0.5px solid var(--color-border-tertiary)">
+              <span style="color:#3C3489;font-weight:500;flex-shrink:0">②</span>GPT-4o Vision API 호출 + 카테고리 추출 프롬프트 주입
+            </div>
+            <div style="font-size:11px;color:var(--color-text-secondary);display:flex;align-items:flex-start;gap:6px;padding:6px;background:var(--color-background-primary);border-radius:var(--border-radius-md);border:0.5px solid var(--color-border-tertiary)">
+              <span style="color:#3C3489;font-weight:500;flex-shrink:0">③</span>JSON 반환 → 슬라이더 자동 채움 → Seul-Score 즉시 계산
+            </div>
+          </div>
+          <div class="ann"><i class="ti ti-code"></i>response_format: json_object 강제</div>
+        </div>
+
+        <div class="card">
+          <div class="sl">수동 입력과 비교</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+            <div style="padding:8px;border-radius:var(--border-radius-md);border:0.5px solid var(--color-border-tertiary);text-align:center">
+              <div style="font-size:18px;color:var(--color-text-tertiary);margin-bottom:4px"><i class="ti ti-forms" aria-hidden="true"></i></div>
+              <div style="font-size:11px;font-weight:500;color:var(--color-text-primary)">수동 입력</div>
+              <div style="font-size:10px;color:var(--color-text-secondary);margin-top:3px">슬라이더 4개 직접 조작</div>
+            </div>
+            <div style="padding:8px;border-radius:var(--border-radius-md);border:1.5px solid #5DCAA5;text-align:center;background:#E1F5EE">
+              <div style="font-size:18px;color:#1D9E75;margin-bottom:4px"><i class="ti ti-scan" aria-hidden="true"></i></div>
+              <div style="font-size:11px;font-weight:500;color:#085041">AI 자동 분석</div>
+              <div style="font-size:10px;color:#0F6E56;margin-top:3px">이미지 1장으로 즉시 완료</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DASHBOARD PAGE -->
+  <div class="screen" id="s-dash">
+    <div class="navbar">
+      <div class="logo">슬<span>픽</span></div>
+      <div class="nav-links"><span>슬세권 맵</span><span>영수증 분석</span><span class="al">카드 랭킹</span><span>커뮤니티</span></div>
+      <div class="nav-right"><span class="nav-badge"><i class="ti ti-moon" aria-hidden="true"></i></span><button class="nav-btn">프로필</button></div>
+    </div>
+
+    <div style="background:#E1F5EE;border:0.5px solid #5DCAA5;border-radius:var(--border-radius-md);padding:8px 12px;display:flex;align-items:center;gap:8px;margin-bottom:12px;font-size:11px;color:#085041">
+      <i class="ti ti-scan" style="font-size:14px;color:#1D9E75" aria-hidden="true"></i>
+      영수증 AI 분석 결과가 자동으로 반영되었습니다. 슬라이더를 조정해 추가 시뮬레이션할 수 있습니다.
+    </div>
+
+    <div class="two-thirds">
+      <div>
+        <div class="mg">
+          <div class="mc"><div class="mv">24,500<span style="font-size:12px">원</span></div><div class="ml">이번 달 예상 절감액</div><div class="ms">↑ 역삼동 기준</div></div>
+          <div class="mc"><div class="mv">92.5</div><div class="ml">Seul-Score</div><div class="ms">1위 카드 기준</div></div>
+        </div>
+        <div class="card" style="margin-bottom:12px">
+          <div class="sl">카테고리별 예상 소비액 <span class="chip purple" style="font-size:10px;vertical-align:middle"><i class="ti ti-scan" style="font-size:10px" aria-hidden="true"></i> AI 자동입력</span></div>
+          <div class="sr"><span class="sn">카페</span><div class="st"><div class="sf" style="width:60%"></div><div class="sh" style="left:60%"></div></div><span class="sv">102,000</span></div>
+          <div class="sr"><span class="sn">편의점</span><div class="st"><div class="sf" style="width:33%"></div><div class="sh" style="left:33%"></div></div><span class="sv">58,000</span></div>
+          <div class="sr"><span class="sn">음식점</span><div class="st"><div class="sf" style="width:72%"></div><div class="sh" style="left:72%"></div></div><span class="sv">183,000</span></div>
+          <div class="sr"><span class="sn">마트</span><div class="st"><div class="sf" style="width:45%"></div><div class="sh" style="left:45%"></div></div><span class="sv">89,000</span></div>
+          <div class="ann"><i class="ti ti-info-circle"></i>슬라이더 조정 시 Seul-Score 실시간 재계산</div>
+        </div>
+        <div class="card" style="margin-bottom:12px">
+          <div class="sl">카드사별 예상 실질 할인액</div>
+          <div class="ca">
+            <div class="cb hl" style="height:78%"><span class="cx">신한 딥드림</span></div>
+            <div class="cb" style="height:54%"><span class="cx">현대 제로</span></div>
+            <div class="cb" style="height:46%"><span class="cx">삼성 iD</span></div>
+            <div class="cb" style="height:38%"><span class="cx">KB 탄탄대로</span></div>
+            <div class="cb" style="height:30%"><span class="cx">우리 카드의정석</span></div>
+          </div>
+          <div class="ann" style="margin-top:24px"><i class="ti ti-chart-bar"></i>Apache ECharts 바 차트 / Seul-Score 기반 정렬</div>
+        </div>
+        <div class="brow">
+          <button class="btn-p"><i class="ti ti-download" aria-hidden="true"></i> 분석 리포트(.png) 저장</button>
+          <button class="btn-s"><i class="ti ti-scan" aria-hidden="true"></i> 영수증 재분석</button>
+          <button class="btn-s">조건 초기화</button>
+        </div>
+      </div>
+      <div>
+        <div class="card" style="margin-bottom:10px">
+          <div class="sl">카드 추천 랭킹</div>
+          <div style="font-size:10px;color:var(--color-text-tertiary);margin-bottom:8px">역삼동 · 실제 소비 476,000원 기준</div>
+          <div class="ci"><div class="cr r1">1</div><div class="cf"><div class="cn">신한 딥드림</div><div class="cc">신한카드 · 카페/편의점</div></div><div style="text-align:right"><div class="cam">-24,500원</div><div class="csb">Score 92.5</div></div></div>
+          <div class="ci"><div class="cr">2</div><div class="cf"><div class="cn">현대 제로</div><div class="cc">현대카드 · 음식점/카페</div></div><div style="text-align:right"><div class="cam" style="color:var(--color-text-primary)">-17,200원</div><div class="csb">Score 78.3</div></div></div>
+          <div class="ci"><div class="cr">3</div><div class="cf"><div class="cn">삼성 iD ON</div><div class="cc">삼성카드 · 편의점/마트</div></div><div style="text-align:right"><div class="cam" style="color:var(--color-text-primary)">-14,800원</div><div class="csb">Score 65.1</div></div></div>
+        </div>
+        <div class="card">
+          <div class="sl">Seul-Score 산출</div>
+          <div class="bw"><div class="bt"><span style="font-size:11px;color:var(--color-text-secondary)">카페 가맹점 매칭률</span><span style="font-size:11px;color:#1D9E75">90%</span></div><div class="bb"><div class="bf" style="width:90%"></div></div></div>
+          <div class="bw"><div class="bt"><span style="font-size:11px;color:var(--color-text-secondary)">편의점 가맹점 매칭률</span><span style="font-size:11px;color:#1D9E75">82%</span></div><div class="bb"><div class="bf" style="width:82%"></div></div></div>
+          <div class="ann"><i class="ti ti-math-function"></i>명목 할인액 × tanh(가맹점 수 / 2)</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- COMMUNITY PAGE -->
+  <div class="screen" id="s-community">
+    <div class="navbar">
+      <div class="logo">슬<span>픽</span></div>
+      <div class="nav-links"><span>슬세권 맵</span><span>영수증 분석</span><span>카드 랭킹</span><span class="al">커뮤니티</span></div>
+      <div class="nav-right"><span class="nav-badge"><i class="ti ti-moon" aria-hidden="true"></i></span><button class="nav-btn">프로필</button></div>
+    </div>
+    <div class="two-thirds">
+      <div>
+        <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
+          <div class="im" style="flex:1"><i class="ti ti-search" style="font-size:13px;margin-right:6px" aria-hidden="true"></i>게시글 검색</div>
+          <div class="im" style="width:120px;cursor:pointer">카드 전체 <i class="ti ti-chevron-down" style="font-size:12px" aria-hidden="true"></i></div>
+          <button class="btn-p"><i class="ti ti-pencil" aria-hidden="true"></i> 글쓰기</button>
+        </div>
+        <div class="card" style="margin-bottom:12px">
+          <div class="sl">최신 게시글</div>
+          <div class="pi"><div style="display:flex;align-items:center;gap:6px;margin-bottom:3px"><span class="ptg">신한 딥드림</span><div class="pt" style="margin-bottom:0">역삼6번출구 GS25 가맹점 분류 오류 제보</div></div><div class="pv">스타벅스 분류가 CE7이 아닌 FD6으로 잡혀서 할인 미적용. 카드사에 문의해보니...</div><div class="pm"><span>김싸피</span><span>역삼동</span><span>2분 전</span><span><i class="ti ti-eye" style="font-size:11px" aria-hidden="true"></i> 142</span></div></div>
+          <div class="pi"><div style="display:flex;align-items:center;gap:6px;margin-bottom:3px"><span class="ptg" style="background:#E6F1FB;color:#185FA5">현대 제로</span><div class="pt" style="margin-bottom:0">이태원 경리단길 카페 혜택 안 먹히는 곳 목록</div></div><div class="pv">직접 발로 뛰며 확인한 가맹점 목록 공유합니다. 탐앤탐스, 커피베이는 제외...</div><div class="pm"><span>이싸피</span><span>이태원동</span><span>1시간 전</span><span><i class="ti ti-eye" style="font-size:11px" aria-hidden="true"></i> 89</span></div></div>
+          <div class="pi"><div style="display:flex;align-items:center;gap:6px;margin-bottom:3px"><span class="ptg" style="background:#FAEEDA;color:#854F0B">삼성 iD ON</span><div class="pt" style="margin-bottom:0">홍대 CU 전점 편의점 할인 꿀팁</div></div><div class="pv">삼성 iD ON 카드 기준 월 최대 5천원 한도 월초에 몰아서 써야 하는 이유...</div><div class="pm"><span>박싸피</span><span>홍대입구역</span><span>3시간 전</span><span><i class="ti ti-eye" style="font-size:11px" aria-hidden="true"></i> 213</span></div></div>
+        </div>
+        <div style="background:var(--color-background-secondary);border-radius:var(--border-radius-lg);padding:14px">
+          <div class="sl">글쓰기</div>
+          <div style="margin-bottom:8px"><div class="fl">연관 카드</div><div class="im">신한 딥드림 <i class="ti ti-chevron-down" style="font-size:12px;margin-left:auto" aria-hidden="true"></i></div></div>
+          <div style="margin-bottom:8px"><div class="fl">제목</div><div class="im" style="color:var(--color-text-tertiary)">역삼동 카드 혜택 팁 공유합니다</div></div>
+          <div style="margin-bottom:8px"><div class="fl">본문</div><div class="tam">직접 사용해본 경험을 바탕으로...</div></div>
+          <div class="as"><i class="ti ti-shield-check" style="font-size:14px" aria-hidden="true"></i><span>AI 가이드라인 준수 확인 · FastAPI Guardrail 자동 감지</span></div>
+          <div class="brow"><button class="btn-p">등록</button><button class="btn-s">취소</button></div>
+        </div>
+      </div>
+      <div>
+        <div class="card" style="margin-bottom:10px">
+          <div class="sl">인기 동네</div>
+          <div class="ir"><span style="font-size:12px;color:var(--color-text-secondary)">역삼동</span><span class="chip green">48</span></div>
+          <div class="ir"><span style="font-size:12px;color:var(--color-text-secondary)">홍대입구역</span><span class="chip">31</span></div>
+          <div class="ir"><span style="font-size:12px;color:var(--color-text-secondary)">이태원동</span><span class="chip">27</span></div>
+        </div>
+        <div class="card">
+          <div class="sl">인기 카드</div>
+          <div class="ir"><span style="font-size:12px;color:var(--color-text-secondary)">신한 딥드림</span><span class="chip green">36</span></div>
+          <div class="ir"><span style="font-size:12px;color:var(--color-text-secondary)">현대 제로</span><span class="chip">24</span></div>
+          <div class="ir"><span style="font-size:12px;color:var(--color-text-secondary)">삼성 iD ON</span><span class="chip">18</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PROFILE PAGE -->
+  <div class="screen" id="s-profile">
+    <div class="navbar">
+      <div class="logo">슬<span>픽</span></div>
+      <div class="nav-links"><span>슬세권 맵</span><span>영수증 분석</span><span>카드 랭킹</span><span>커뮤니티</span></div>
+      <div class="nav-right"><span class="nav-badge"><i class="ti ti-moon" aria-hidden="true"></i></span><button class="nav-btn">로그아웃</button></div>
+    </div>
+    <div class="two-col">
+      <div>
+        <div class="card">
+          <div class="ph"><div class="av">김</div><div><div class="pna">김싸피</div><div class="psu">가입일 2025.01.07</div><div class="pad"><i class="ti ti-map-pin" style="font-size:12px" aria-hidden="true"></i> 서울 강남구 역삼동</div></div></div>
+          <div style="margin-bottom:10px"><div class="fl">닉네임</div><div class="im">김싸피</div></div>
+          <div style="margin-bottom:10px"><div class="fl">주 생활 주소지</div><div class="im"><i class="ti ti-map-pin" style="font-size:12px;margin-right:6px" aria-hidden="true"></i>서울 강남구 역삼동</div></div>
+          <div style="margin-bottom:10px"><div class="fl">프로필 이미지</div><div style="display:flex;align-items:center;gap:10px"><div class="av" style="width:40px;height:40px;font-size:14px">김</div><button class="btn-s" style="font-size:11px"><i class="ti ti-upload" aria-hidden="true"></i> 변경</button></div></div>
+          <div class="brow"><button class="btn-p">저장</button><button class="btn-s">비밀번호 변경</button></div>
+        </div>
+      </div>
+      <div>
+        <div class="card" style="margin-bottom:10px">
+          <div class="sl">관심 카드 설정</div>
+          <div class="ic"><div><div style="font-size:12px;color:var(--color-text-primary)">신한 딥드림</div><div style="font-size:10px;color:var(--color-text-secondary)">신한카드 · 카페/편의점</div></div><div class="ck">✓</div></div>
+          <div class="ic"><div><div style="font-size:12px;color:var(--color-text-primary)">현대 제로</div><div style="font-size:10px;color:var(--color-text-secondary)">현대카드 · 음식점</div></div><div class="ck">✓</div></div>
+          <div class="ic"><div><div style="font-size:12px;color:var(--color-text-primary)">삼성 iD ON</div><div style="font-size:10px;color:var(--color-text-secondary)">삼성카드 · 편의점/마트</div></div><div class="ck off"></div></div>
+        </div>
+        <div class="card">
+          <div class="sl">내가 쓴 글</div>
+          <div class="pi"><div class="pt">역삼6번출구 GS25 가맹점 분류 오류 제보</div><div class="pm"><span class="ptg">신한 딥드림</span><span>2분 전</span><span style="margin-left:auto;display:flex;gap:4px"><button class="btn-s" style="font-size:10px;padding:2px 6px">수정</button><button class="btn-s" style="font-size:10px;padding:2px 6px;color:#A32D2D;border-color:#F09595">삭제</button></span></div></div>
+          <div class="pi"><div class="pt">역삼동 신한카드 카페 혜택 총정리</div><div class="pm"><span class="ptg">신한 딥드림</span><span>3일 전</span><span style="margin-left:auto;display:flex;gap:4px"><button class="btn-s" style="font-size:10px;padding:2px 6px">수정</button><button class="btn-s" style="font-size:10px;padding:2px 6px;color:#A32D2D;border-color:#F09595">삭제</button></span></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function show(id,el){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));document.getElementById('s-'+id).classList.add('active');el.classList.add('active')}
+</script>
