@@ -2,6 +2,21 @@
 
 단일 HTML 와이어프레임을 Vue 3 프론트엔드와 Django REST API 백엔드로 분리한 MVP 골격입니다.
 
+# 커밋 컨벤션
+
+[Gitmoji](https://gitmoji.dev/)로 Commit Message 남기기  
+ex) ✨ Feat: LLM에게 프롬프팅 설정 완료
+|Icon|Feat||
+|-----|----|---|
+|✨|Feat|새로운 기능 추가|
+|🐛|Fix|버그/기능에 따른 코드 변경 시|
+|♻️|Refactor|코드의 가독성, 효율성을 위한 코드 변경 시 (기능의 문제 X)|
+|📝|Docs|문서 추가/수정/삭제|
+|🔧|Chore|설정 추가/변경|
+|✅|Test|테스트 코드 추가/수정|
+
+---
+
 ## 구조
 
 ```text
