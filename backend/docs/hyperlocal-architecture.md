@@ -5,6 +5,47 @@
 
 ## API 엔드포인트
 
+### POST `/api/v1/hyperlocal/simulate/`
+
+입력:
+
+- `spending`, 선택. 카테고리별 월 소비액
+- `spending_source`, 선택. 예: `user`, `mydata`, `image_parser`
+- `transactions`, 선택. 건당 조건 계산용 거래 목록
+- `infrastructure`, 선택. 카테고리별 주변 매장 수
+- `previous_month_spending`
+- `owned_card_ids`
+- `allow_mock_fallback`, 선택. 로컬 UI 테스트에서만 사용
+
+`spending`이 없으면 추천 코어가 콜드스타트 소비 프로필을 사용한다.
+
+책임:
+
+- 카드 약관 규칙으로 월 예상 총혜택을 계산한다.
+- 연회비를 월 단위로 차감해 예상 순혜택을 계산한다.
+- 실제 혜택 금액과 분리된 지역 적합도를 계산한다.
+- 계산 상세 내역과 소비 데이터 출처를 반환한다.
+- 보유 카드는 점수 가산 없이 표시 정보만 반환한다.
+- SQLite에서 `active`인 카드만 추천 후보로 사용한다.
+- 추천 후보, 제외 카드 수와 fallback 사유를 메타데이터로 반환한다.
+
+현재 추천 메타데이터:
+
+```json
+{
+  "recommendation_source": "sqlite",
+  "candidate_count": 0,
+  "excluded_review_count": 3,
+  "excluded_invalid_count": 0,
+  "excluded_inactive_count": 0,
+  "excluded_unready_count": 0,
+  "fallback_reason": "no_active_cards"
+}
+```
+
+`allow_mock_fallback=true`가 없으면 active 카드가 없는 경우 빈 추천 목록을
+반환한다.
+
 ### GET `/api/v1/hyperlocal/map-summary/`
 
 입력:
