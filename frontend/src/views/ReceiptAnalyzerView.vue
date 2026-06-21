@@ -130,7 +130,7 @@
 </template>
 
 <script setup>
-import { computed, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import {
   BookOpen,
@@ -150,6 +150,7 @@ const file = ref(null);
 const loading = ref(false);
 const spending = ref({ cafe: 102000, convenience: 58000, food: 183000, mart: 89000, shopping: 44000 });
 const bestCard = ref(null);
+const mapSummary = ref(null);
 
 const steps = ["이미지 업로드", "AI 소비 파싱", "결과 확인 · 수정", "카드 추천 바로가기"];
 const labels = {
@@ -192,8 +193,30 @@ function useMock() {
 }
 
 async function recommend() {
-  const result = await simulateCards({ spending: spending.value });
+  const result = await simulateCards({
+    spending: spending.value,
+    infrastructure: mapSummary.value?.infrastructure || undefined,
+    owned_card_ids: [],
+  });
+  localStorage.setItem(
+    "seulpick:last-simulation",
+    JSON.stringify({
+      ...result,
+      infrastructure: mapSummary.value?.infrastructure || [],
+    })
+  );
   bestCard.value = result.best_card;
   router.push("/dashboard");
 }
+
+onMounted(() => {
+  const saved = localStorage.getItem("seulpick:last-map-summary");
+  if (saved) {
+    try {
+      mapSummary.value = JSON.parse(saved);
+    } catch {
+      mapSummary.value = null;
+    }
+  }
+});
 </script>
