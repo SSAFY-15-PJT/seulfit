@@ -1,32 +1,25 @@
 import json
-from math import tanh
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from django.conf import settings
 
+from finance.card_catalog import load_recommendation_candidates
+from finance.recommendation import (
+    CATEGORY_LABELS,
+    DEFAULT_COHORT_SPENDING,
+    DEFAULT_INFRASTRUCTURE,
+    rank_card_recommendations,
+)
 
-DEFAULT_SPENDING = {
-    "cafe": 102000,
-    "convenience": 58000,
-    "food": 183000,
-    "mart": 89000,
-    "shopping": 44000,
-}
 
-CATEGORY_LABELS = {
-    "cafe": "카페",
-    "convenience": "편의점",
-    "food": "외식",
-    "mart": "마트",
-    "shopping": "쇼핑",
-}
+DEFAULT_SPENDING = DEFAULT_COHORT_SPENDING
 
 KAKAO_CATEGORY_CODES = {
     "convenience": {"code": "CS2", "label": "편의점"},
     "cafe": {"code": "CE7", "label": "카페"},
     "mart": {"code": "MT1", "label": "마트"},
-    "food": {"code": "FD6", "label": "음식점"},
+    "dining": {"code": "FD6", "label": "외식"},
 }
 
 CARD_PRODUCTS = [
@@ -34,25 +27,34 @@ CARD_PRODUCTS = [
         "id": 1,
         "name": "신한 딥드림",
         "issuer": "신한카드",
+        "image_url": "https://example.com/cards/shinhan-deep-dream.png",
         "focus": ["cafe", "convenience"],
         "discount_rate": 0.075,
-        "max_discount_limit": 30000,
+        "annual_fee": 10000,
+        "monthly_discount_limit": 30000,
+        "previous_month_requirement": 300000,
     },
     {
         "id": 2,
         "name": "현대 ZERO",
         "issuer": "현대카드",
+        "image_url": "https://example.com/cards/hyundai-zero.png",
         "focus": ["food", "cafe"],
         "discount_rate": 0.052,
-        "max_discount_limit": 22000,
+        "annual_fee": 15000,
+        "monthly_discount_limit": 22000,
+        "previous_month_requirement": 0,
     },
     {
         "id": 3,
         "name": "삼성 iD ON",
         "issuer": "삼성카드",
+        "image_url": "https://example.com/cards/samsung-id-on.png",
         "focus": ["convenience", "mart"],
         "discount_rate": 0.048,
-        "max_discount_limit": 18000,
+        "annual_fee": 20000,
+        "monthly_discount_limit": 18000,
+        "previous_month_requirement": 300000,
     },
 ]
 
@@ -68,35 +70,40 @@ def parse_consumption_image(_uploaded_file):
     }
 
 
-def simulate_cards(spending=None, infrastructure=None):
-    spending = spending or DEFAULT_SPENDING
-    infrastructure = infrastructure or {"cafe": 8, "convenience": 12, "food": 9, "mart": 1}
+def simulate_cards(
+    spending=None,
+    infrastructure=None,
+    previous_month_spending=0,
+    owned_card_ids=None,
+    transactions=None,
+    spending_source=None,
+    allow_mock_fallback=False,
+):
+    infrastructure = infrastructure or DEFAULT_INFRASTRUCTURE
+    catalog = load_recommendation_candidates()
+    cards = catalog["cards"]
+    metadata = catalog["metadata"]
 
-    ranking = []
-    for card in CARD_PRODUCTS:
-        expected_discount = 0
-        score_basis = 0
+    if not cards and allow_mock_fallback:
+        cards = CARD_PRODUCTS
+        metadata = {
+            **metadata,
+            "recommendation_source": "mock_fallback",
+            "candidate_count": len(cards),
+            "fallback_reason": "no_active_cards",
+        }
 
-        for category in card["focus"]:
-            amount = int(spending.get(category, 0))
-            store_count = int(infrastructure.get(category, 0))
-            match_weight = tanh(store_count / 2)
-            expected_discount += amount * card["discount_rate"] * match_weight
-            score_basis += match_weight * 50
-
-        expected_discount = min(int(expected_discount), card["max_discount_limit"])
-        ranking.append(
-            {
-                "id": card["id"],
-                "name": card["name"],
-                "issuer": card["issuer"],
-                "focus": [CATEGORY_LABELS.get(item, item) for item in card["focus"]],
-                "estimated_savings": expected_discount,
-                "seul_score": round(min(100, score_basis + expected_discount / 1000), 1),
-            }
-        )
-
-    return sorted(ranking, key=lambda item: item["seul_score"], reverse=True)
+    ranking = rank_card_recommendations(
+        cards=cards,
+        spending=spending,
+        infrastructure=infrastructure,
+        previous_month_spending=previous_month_spending,
+        owned_card_ids=owned_card_ids,
+        transactions=transactions,
+        spending_source=spending_source,
+        fallback_spending=DEFAULT_SPENDING,
+    )
+    return {"ranking": ranking, "metadata": metadata}
 
 
 def kakao_category_search(category_code, lat, lng, radius):

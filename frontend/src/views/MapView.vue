@@ -28,7 +28,9 @@
             <small v-if="item.walk_minutes">도보 {{ item.walk_minutes }}분</small>
           </strong>
         </div>
-        <button class="primary-button" @click="goDashboard">카드 시뮬레이션 시작</button>
+        <button class="primary-button" :disabled="recommending" @click="runRecommendation">
+          {{ recommending ? "추천 계산 중..." : "카드 추천 결과 보기" }}
+        </button>
       </div>
     </div>
 
@@ -64,7 +66,7 @@
 import { nextTick, onMounted, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
 import { LocateFixed, Search, Sun } from "lucide-vue-next";
-import { getMapSummary, getWeatherCuration } from "../api/client";
+import { getMapSummary, getWeatherCuration, simulateCards } from "../api/client";
 
 const KAKAO_JAVASCRIPT_KEY = import.meta.env.VITE_KAKAO_JAVASCRIPT_KEY;
 const DEFAULT_CENTER = { lat: 37.4979, lng: 127.0276, label: "강남역" };
@@ -75,6 +77,7 @@ const map = ref({ infrastructure: [], markers: [], center: DEFAULT_CENTER });
 const weather = ref({ temperature_celsius: 0, condition: "", message: "" });
 const mapError = ref("");
 const loading = ref(false);
+const recommending = ref(false);
 const selectedPoint = reactive({ lat: DEFAULT_CENTER.lat, lng: DEFAULT_CENTER.lng });
 
 let kakaoMap = null;
@@ -89,10 +92,6 @@ const markerColors = {
   mart: "#b66a14",
   food: "#7a4dd8",
 };
-
-function goDashboard() {
-  router.push("/dashboard");
-}
 
 function loadKakaoSdk() {
   if (!KAKAO_JAVASCRIPT_KEY) {
@@ -216,6 +215,8 @@ async function loadMapAt(point = DEFAULT_CENTER) {
       },
     };
 
+    localStorage.setItem("seulpick:last-map-summary", JSON.stringify(map.value));
+
     await nextTick();
     kakaoApi = await loadKakaoSdk();
     drawAnalysisOnMap();
@@ -223,6 +224,30 @@ async function loadMapAt(point = DEFAULT_CENTER) {
     mapError.value = error.message || "지도 초기화 중 오류가 발생했습니다.";
   } finally {
     loading.value = false;
+  }
+}
+
+async function runRecommendation() {
+  recommending.value = true;
+  mapError.value = "";
+  try {
+    const result = await simulateCards({
+      infrastructure: map.value.infrastructure || [],
+      owned_card_ids: [],
+    });
+    localStorage.setItem(
+      "seulpick:last-simulation",
+      JSON.stringify({
+        ...result,
+        infrastructure: map.value.infrastructure || [],
+        center: map.value.center || DEFAULT_CENTER,
+      })
+    );
+    router.push("/dashboard");
+  } catch (error) {
+    mapError.value = error.message || "추천 계산에 실패했습니다.";
+  } finally {
+    recommending.value = false;
   }
 }
 

@@ -1,7 +1,23 @@
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .services import DEFAULT_SPENDING, get_map_summary, parse_consumption_image, simulate_cards
+from .services import get_map_summary, parse_consumption_image, simulate_cards
+
+
+def normalize_infrastructure(infrastructure):
+    if isinstance(infrastructure, dict):
+        return infrastructure
+    if isinstance(infrastructure, list):
+        normalized = {}
+        for item in infrastructure:
+            if not isinstance(item, dict):
+                continue
+            category = item.get("category")
+            if not category:
+                continue
+            normalized[str(category)] = item.get("count", item.get("store_count", 0))
+        return normalized
+    return {}
 
 
 class ParseImageView(APIView):
@@ -13,14 +29,33 @@ class ParseImageView(APIView):
 
 class SimulateView(APIView):
     def post(self, request):
-        spending = request.data.get("spending") or DEFAULT_SPENDING
-        infrastructure = request.data.get("infrastructure")
-        ranking = simulate_cards(spending=spending, infrastructure=infrastructure)
+        spending = request.data.get("spending")
+        infrastructure = normalize_infrastructure(request.data.get("infrastructure"))
+        previous_month_spending = request.data.get("previous_month_spending", 0)
+        owned_card_ids = request.data.get("owned_card_ids", [])
+        transactions = request.data.get("transactions")
+        spending_source = request.data.get("spending_source")
+        allow_mock_fallback = request.data.get("allow_mock_fallback", False) is True
+        simulation = simulate_cards(
+            spending=spending,
+            infrastructure=infrastructure,
+            previous_month_spending=previous_month_spending,
+            owned_card_ids=owned_card_ids,
+            transactions=transactions,
+            spending_source=spending_source,
+            allow_mock_fallback=allow_mock_fallback,
+        )
+        ranking = simulation["ranking"]
+        spending_profile = ranking[0]["spending_profile"] if ranking else None
         return Response(
             {
                 "spending": spending,
+                "spending_profile": spending_profile,
+                "previous_month_spending": previous_month_spending,
+                "owned_card_ids": owned_card_ids,
                 "card_ranking_list": ranking,
                 "best_card": ranking[0] if ranking else None,
+                **simulation["metadata"],
             }
         )
 
