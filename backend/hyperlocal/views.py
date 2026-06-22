@@ -4,18 +4,39 @@ from rest_framework.views import APIView
 from .services import get_map_summary, parse_consumption_image, simulate_cards
 
 
+CATEGORY_KEY_ALIASES = {
+    "카페": "cafe",
+    "편의점": "convenience",
+    "외식": "dining",
+    "음식점": "dining",
+    "배달": "delivery",
+    "마트": "mart",
+    "쇼핑": "shopping",
+    "기타": "etc",
+    "CE7": "cafe",
+    "CS2": "convenience",
+    "FD6": "dining",
+    "MT1": "mart",
+}
+
+
 def normalize_infrastructure(infrastructure):
     if isinstance(infrastructure, dict):
-        return infrastructure
+        normalized = {}
+        for key, value in infrastructure.items():
+            canonical_key = CATEGORY_KEY_ALIASES.get(str(key), str(key))
+            normalized[canonical_key] = value
+        return normalized
     if isinstance(infrastructure, list):
         normalized = {}
         for item in infrastructure:
             if not isinstance(item, dict):
                 continue
-            category = item.get("category")
+            category = item.get("category") or item.get("code")
             if not category:
                 continue
-            normalized[str(category)] = item.get("count", item.get("store_count", 0))
+            canonical_key = CATEGORY_KEY_ALIASES.get(str(category), str(category))
+            normalized[canonical_key] = item.get("count", item.get("store_count", 0))
         return normalized
     return {}
 

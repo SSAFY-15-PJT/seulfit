@@ -602,6 +602,7 @@ def calculate_card_recommendation(
         "id": card.get("id"),
         "name": card.get("name"),
         "issuer": card.get("issuer"),
+        "card_type": card.get("card_type", "credit"),
         "image_url": card.get("image_url", ""),
         "focus": [CATEGORY_LABELS.get(item, item) for item in card.get("focus", [])],
         "estimated_savings": int(estimated_gross_benefit),
