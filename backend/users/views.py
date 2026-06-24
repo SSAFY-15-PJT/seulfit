@@ -1,5 +1,10 @@
 from django.contrib.auth import get_user_model
+from django.contrib.auth import authenticate
+from django.contrib.auth import login as auth_login
+from django.contrib.auth import logout as auth_logout
 from django.db import transaction
+from django.views.decorators.csrf import ensure_csrf_cookie
+from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -11,6 +16,88 @@ from .models import UserUploadedReport
 
 
 User = get_user_model()
+
+
+def _frontend_profile(user):
+    if not user or not user.is_authenticated:
+        return {
+            "name": "김슬픽",
+            "email": "seulpick@example.com",
+            "ownedCards": [],
+            "monthlySpend": 800000,
+        }
+    return {
+        "id": user.id,
+        "username": user.username,
+        "name": user.first_name or user.username,
+        "email": user.email,
+        "ownedCards": list(
+            user.owned_cards.select_related("card").values_list("card__name", flat=True)
+        ),
+        "monthlySpend": 800000,
+    }
+
+
+@api_view(["POST"])
+def login_view(request):
+    username = (request.data.get("username") or request.data.get("email") or "").strip()
+    password = request.data.get("password") or ""
+    user = authenticate(request, username=username, password=password)
+    if user is None:
+        return Response({"error": "아이디 또는 비밀번호가 올바르지 않습니다."}, status=400)
+    auth_login(request, user)
+    return Response({"authenticated": True, "profile": _frontend_profile(user)})
+
+
+@api_view(["GET"])
+@ensure_csrf_cookie
+def auth_status_view(request):
+    if not request.user.is_authenticated:
+        return Response({"authenticated": False, "profile": None})
+    return Response({"authenticated": True, "profile": _frontend_profile(request.user)})
+
+
+@api_view(["POST"])
+def register_view(request):
+    username = (request.data.get("username") or request.data.get("email") or "").strip()
+    password = request.data.get("password") or ""
+    name = (request.data.get("name") or username).strip()
+    email = (request.data.get("email") or "").strip()
+    if not username or not password:
+        return Response({"error": "아이디와 비밀번호를 입력해주세요."}, status=400)
+    if User.objects.filter(username=username).exists():
+        return Response({"error": "이미 존재하는 아이디입니다."}, status=400)
+    user = User.objects.create_user(
+        username=username,
+        password=password,
+        email=email,
+        first_name=name,
+    )
+    auth_login(request, user)
+    return Response({"authenticated": True, "profile": _frontend_profile(user)})
+
+
+@api_view(["POST"])
+def logout_view(request):
+    auth_logout(request)
+    return Response({"authenticated": False, "profile": _frontend_profile(request.user)})
+
+
+@api_view(["POST"])
+def update_profile_view(request):
+    if not request.user.is_authenticated:
+        return Response({"error": "로그인이 필요합니다."}, status=401)
+    request.user.first_name = (
+        request.data.get("name") or request.user.first_name or request.user.username
+    ).strip()
+    request.user.email = (request.data.get("email") or request.user.email).strip()
+    password = request.data.get("password") or ""
+    if password:
+        request.user.set_password(password)
+    request.user.save()
+    if password:
+        auth_login(request, request.user)
+    return Response({"profile": _frontend_profile(request.user)})
 
 
 def _resolve_user(payload):
@@ -43,7 +130,8 @@ class ProfileView(APIView):
             .order_by("user_id")
             .first()
         )
-        if profile:
+        user = profile.user if profile else User.objects.order_by("id").first()
+        if user:
             owned_cards = [
                 {
                     "id": owned.card_id,
@@ -56,21 +144,34 @@ class ProfileView(APIView):
                         or ""
                     ),
                 }
-                for owned in profile.user.owned_cards.all().select_related("card")
+                for owned in user.owned_cards.all().select_related("card")
             ]
             latest_report = (
-                profile.user.uploaded_reports.order_by("-created_at")
+                user.uploaded_reports.order_by("-created_at")
                 .values("file_url", "file_type", "parse_status")
                 .first()
             )
+            consumption_profile = getattr(user, "consumption_profile", None)
             return Response(
                 {
-                    "username": profile.user.get_username(),
-                    "nickname": profile.nickname,
-                    "home_address": profile.preferred_area,
-                    "monthly_expected_spend": profile.monthly_expected_spend,
+                    "username": user.get_username(),
+                    "nickname": profile.nickname if profile else "",
+                    "home_address": profile.preferred_area if profile else "",
+                    "monthly_expected_spend": (
+                        profile.monthly_expected_spend if profile else 0
+                    ),
                     "favorite_cards": owned_cards,
                     "uploaded_report": latest_report,
+                    "consumption_profile": (
+                        {
+                            "source": consumption_profile.source,
+                            "is_cold_start": consumption_profile.is_cold_start,
+                            "spending_json": consumption_profile.spending_json,
+                            "last_updated_at": consumption_profile.last_updated_at.isoformat(),
+                        }
+                        if consumption_profile
+                        else None
+                    ),
                 }
             )
 
@@ -82,6 +183,7 @@ class ProfileView(APIView):
                 "monthly_expected_spend": 0,
                 "favorite_cards": [],
                 "uploaded_report": None,
+                "consumption_profile": None,
             }
         )
 
@@ -155,13 +257,24 @@ class UploadedReportCreateView(APIView):
     @transaction.atomic
     def post(self, request):
         user = _resolve_user(request.data)
+        parsed_payload = request.data.get("parsed_payload", {})
         report = UserUploadedReport.objects.create(
             user=user,
             file_url=request.data["file_url"],
             file_type=request.data.get("file_type", ""),
             parse_status=request.data.get("parse_status", "raw"),
-            parsed_payload=request.data.get("parsed_payload", {}),
+            parsed_payload=parsed_payload,
         )
+        spending = parsed_payload.get("spending") if isinstance(parsed_payload, dict) else None
+        if isinstance(spending, dict):
+            UserConsumptionProfile.objects.update_or_create(
+                user=user,
+                defaults={
+                    "source": "image_parser",
+                    "spending_json": spending,
+                    "is_cold_start": False,
+                },
+            )
         return Response(
             {
                 "id": report.id,
@@ -169,6 +282,7 @@ class UploadedReportCreateView(APIView):
                 "file_url": report.file_url,
                 "file_type": report.file_type,
                 "parse_status": report.parse_status,
+                "consumption_profile_updated": isinstance(spending, dict),
             },
             status=201,
         )

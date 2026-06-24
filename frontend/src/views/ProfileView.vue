@@ -52,6 +52,34 @@
       </section>
 
       <section class="panel">
+        <div class="section-head slim">
+          <div>
+            <p class="eyebrow">소비 패턴</p>
+            <h3>VLM 분석 카테고리</h3>
+          </div>
+          <div class="section-hint">{{ consumptionSourceLabel }}</div>
+        </div>
+
+        <div v-if="spendingRows.length" class="spending-dashboard">
+          <div class="spending-total">
+            <span>월 소비 합계</span>
+            <strong>{{ formatWon(totalSpending) }}</strong>
+          </div>
+          <div v-for="item in spendingRows" :key="item.key" class="spending-row">
+            <div>
+              <span>{{ item.label }}</span>
+              <strong>{{ formatWon(item.amount) }}</strong>
+            </div>
+            <div class="spending-bar">
+              <i :style="{ width: `${item.ratio}%` }"></i>
+            </div>
+            <small>{{ item.ratio.toFixed(1) }}%</small>
+          </div>
+        </div>
+        <p v-else class="empty-copy">아직 저장된 소비 분석 결과가 없습니다.</p>
+      </section>
+
+      <section class="panel">
         <p class="eyebrow">내가 쓴 글</p>
         <article v-for="post in myPosts" :key="post.title" class="my-post">
           <h3>{{ post.title }}</h3>
@@ -69,7 +97,7 @@
 
 <script setup>
 import { Check, MapPin, Upload } from "lucide-vue-next";
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { getProfile } from "../api/client";
 
 const profile = ref({
@@ -78,7 +106,17 @@ const profile = ref({
   home_address: "서울 강남구 역삼동",
   favorite_cards: [],
   uploaded_report: null,
+  consumption_profile: null,
 });
+
+const categoryLabels = {
+  cafe: "카페",
+  convenience: "편의점",
+  dining: "외식",
+  delivery: "배달",
+  mart: "마트",
+  shopping: "쇼핑",
+};
 
 const interestCards = [
   { name: "신한 딥드림", issuer: "신한카드", focus: "카페 · 편의점", enabled: true },
@@ -90,6 +128,41 @@ const myPosts = [
   { title: "강남 6번출구 GS25 가맹점 분류 오류 제보", card: "신한 딥드림", created_at: "2분 전" },
   { title: "강남역 신한카드 카페 혜택 총정리", card: "신한 딥드림", created_at: "3일 전" },
 ];
+
+function formatWon(value) {
+  return `${Number(value || 0).toLocaleString()}원`;
+}
+
+const spendingMap = computed(
+  () => profile.value.consumption_profile?.spending_json || {},
+);
+
+const totalSpending = computed(() =>
+  Object.entries(spendingMap.value)
+    .filter(([key]) => key !== "etc")
+    .reduce((sum, [, amount]) => sum + Number(amount || 0), 0),
+);
+
+const spendingRows = computed(() =>
+  Object.entries(spendingMap.value)
+    .filter(([key, amount]) => key !== "etc" && Number(amount || 0) > 0)
+    .map(([key, amount]) => ({
+      key,
+      label: categoryLabels[key] || key,
+      amount: Number(amount || 0),
+      ratio: totalSpending.value
+        ? (Number(amount || 0) / totalSpending.value) * 100
+        : 0,
+    }))
+    .sort((left, right) => right.amount - left.amount),
+);
+
+const consumptionSourceLabel = computed(() => {
+  const source = profile.value.consumption_profile?.source;
+  if (source === "image_parser") return "VLM 리포트 기반";
+  if (source) return `${source} 기반`;
+  return "분석 대기";
+});
 
 onMounted(async () => {
   profile.value = { ...profile.value, ...(await getProfile()) };

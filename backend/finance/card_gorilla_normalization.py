@@ -255,6 +255,7 @@ def parse_minimum_transaction_amount(text):
     patterns = (
         rf"(?:건당|매출\s*건당|이용\s*건당)\s*({AMOUNT_PATTERN})\s*이상",
         rf"1회\s*이용\s*(?:금액)?\s*({AMOUNT_PATTERN})\s*이상",
+        rf"({AMOUNT_PATTERN})\s*이상\s*(?:결제|이용)",
     )
     for pattern in patterns:
         match = re.search(pattern, text)
@@ -266,6 +267,7 @@ def parse_minimum_transaction_amount(text):
 def parse_category_monthly_limit(text):
     patterns = (
         rf"월\s*(?:할인|적립|캐시백)\s*한도\s*:?\s*({AMOUNT_PATTERN})",
+        rf"할인\s*한도\s*:?\s*({AMOUNT_PATTERN})",
         rf"월\s*(?:최대\s*)?({AMOUNT_PATTERN})\s*(?:까지|이내)?\s*"
         r"(?:할인|적립|캐시백)",
         rf"월\s*\d+\s*회\s*\(\s*({AMOUNT_PATTERN})\s*이내\s*\)",
@@ -287,6 +289,28 @@ def parse_usage_limit(text, period):
         text,
     )
     return int(match.group(1)) if match else None
+
+
+def parse_category_specific_limits(category, text):
+    category_patterns = {
+        "cafe": r"(?:커피전문점|카페)",
+        "convenience": r"편의점",
+        "delivery": r"(?:배달앱|배달)",
+        "dining": r"(?:음식점|외식|푸드)",
+    }
+    category_pattern = category_patterns.get(category)
+    if not category_pattern:
+        return None, None
+
+    match = re.search(
+        rf"{category_pattern}\s*\d+(?:\.\d+)?\s*%\s*"
+        rf"(?:할인|캐시백|적립)\s*"
+        rf"월\s*({AMOUNT_PATTERN})\s*,?\s*(\d+)\s*회",
+        text.replace("(", " ").replace(")", " "),
+    )
+    if not match:
+        return None, None
+    return parse_korean_amount(match.group(1)), int(match.group(2))
 
 
 def benefit_categories(text):
@@ -430,8 +454,17 @@ def parse_benefit(entry):
             )
         ),
     )
-    return [
-        {
+    parsed_benefits = []
+    for category in categories:
+        scoped_limit = category_monthly_limit
+        scoped_monthly_usage = monthly_usage_limit
+        if len(categories) > 1:
+            scoped_limit, scoped_monthly_usage = parse_category_specific_limits(
+                category,
+                raw_text,
+            )
+        parsed_benefits.append(
+            {
             "category": category,
             "benefit_group": "",
             "discount_type": discount_type,
@@ -442,9 +475,9 @@ def parse_benefit(entry):
             "per_transaction_limit": per_transaction_limit,
             "daily_benefit_limit": None,
             "daily_usage_limit": daily_usage_limit,
-            "monthly_usage_limit": monthly_usage_limit,
+            "monthly_usage_limit": scoped_monthly_usage,
             "estimated_monthly_uses": None,
-            "category_monthly_limit": category_monthly_limit,
+            "category_monthly_limit": scoped_limit,
             "merchant_scope": extract_merchant_scope(category, raw_text),
             "channel": channel,
             "condition_text": raw_text,
@@ -455,8 +488,8 @@ def parse_benefit(entry):
                 *channel_conditions,
             ],
         }
-        for category in categories
-    ]
+        )
+    return parsed_benefits
 
 
 def parse_card_gorilla_payload(payload):

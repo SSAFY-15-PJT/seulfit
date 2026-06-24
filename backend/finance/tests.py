@@ -716,6 +716,35 @@ class RecommendationCoreTests(SimpleTestCase):
         self.assertEqual(detail["transaction_count"], 2)
         self.assertEqual(detail["final_benefit"], 6000)
 
+    def test_amount_benefit_is_zero_when_category_spending_is_zero(self):
+        card = {
+            "id": 1,
+            "name": "Amount Card",
+            "issuer": "Issuer",
+            "focus": ["cafe"],
+            "annual_fee": 0,
+            "previous_month_requirement": 0,
+            "benefits": [
+                {
+                    "category": "cafe",
+                    "discount_type": "amount",
+                    "discount_amount": 1000,
+                    "estimated_monthly_uses": 2,
+                }
+            ],
+        }
+
+        result = calculate_card_recommendation(
+            card=card,
+            spending={"cafe": 0},
+        )
+
+        self.assertEqual(result["estimated_gross_benefit"], 0)
+        self.assertEqual(
+            result["calculation_breakdown"][0]["transaction_count"],
+            0,
+        )
+
     def test_merchant_scope_only_counts_matching_transactions(self):
         card = {
             "id": 1,
@@ -870,3 +899,370 @@ class RecommendationCoreTests(SimpleTestCase):
         self.assertEqual(cafe_first[0]["id"], 2)
         self.assertGreater(mart_first[0]["local_fit_score"], mart_first[1]["local_fit_score"])
         self.assertGreater(cafe_first[0]["local_fit_score"], cafe_first[1]["local_fit_score"])
+
+    def test_brand_distribution_changes_ranking_without_changing_savings(self):
+        cards = [
+            {
+                "id": 1,
+                "name": "Starbucks Card",
+                "issuer": "Issuer",
+                "focus": ["cafe"],
+                "annual_fee": 0,
+                "previous_month_requirement": 0,
+                "benefits": [
+                    {
+                        "category": "cafe",
+                        "discount_type": "rate",
+                        "discount_rate": 0.1,
+                        "merchant_scope": ["스타벅스"],
+                    }
+                ],
+            },
+            {
+                "id": 2,
+                "name": "Mega Card",
+                "issuer": "Issuer",
+                "focus": ["cafe"],
+                "annual_fee": 0,
+                "previous_month_requirement": 0,
+                "benefits": [
+                    {
+                        "category": "cafe",
+                        "discount_type": "rate",
+                        "discount_rate": 0.1,
+                        "merchant_scope": ["메가MGC커피"],
+                    }
+                ],
+            },
+        ]
+
+        starbucks_area = rank_card_recommendations(
+            cards=cards,
+            spending={"cafe": 100000},
+            selected_category="cafe",
+            infrastructure={
+                "cafe": {
+                    "count": 20,
+                    "sample_count": 10,
+                    "merchant_counts": {"스타벅스": 6, "메가커피": 1},
+                }
+            },
+        )
+        mega_area = rank_card_recommendations(
+            cards=cards,
+            spending={"cafe": 100000},
+            selected_category="cafe",
+            infrastructure={
+                "cafe": {
+                    "count": 20,
+                    "sample_count": 10,
+                    "merchant_counts": {"스타벅스": 1, "메가커피": 6},
+                }
+            },
+        )
+
+        self.assertEqual(starbucks_area[0]["id"], 1)
+        self.assertEqual(mega_area[0]["id"], 2)
+        self.assertEqual(starbucks_area[0]["estimated_gross_benefit"], 0)
+        self.assertEqual(mega_area[0]["estimated_gross_benefit"], 0)
+        self.assertGreater(
+            starbucks_area[0]["category_scores"]["cafe"][
+                "merchant_accessibility"
+            ],
+            starbucks_area[1]["category_scores"]["cafe"][
+                "merchant_accessibility"
+            ],
+        )
+
+    def test_selected_category_changes_ranking(self):
+        cards = [
+            {
+                "id": 1,
+                "name": "Cafe Card",
+                "issuer": "Issuer",
+                "focus": ["cafe"],
+                "discount_rate": 0.1,
+                "annual_fee": 0,
+                "previous_month_requirement": 0,
+            },
+            {
+                "id": 2,
+                "name": "Mart Card",
+                "issuer": "Issuer",
+                "focus": ["mart"],
+                "discount_rate": 0.1,
+                "annual_fee": 0,
+                "previous_month_requirement": 0,
+            },
+        ]
+        spending = {"cafe": 100000, "mart": 100000}
+        infrastructure = {"cafe": 10, "mart": 10}
+
+        cafe_results = rank_card_recommendations(
+            cards=cards,
+            spending=spending,
+            infrastructure=infrastructure,
+            selected_category="cafe",
+        )
+        mart_results = rank_card_recommendations(
+            cards=cards,
+            spending=spending,
+            infrastructure=infrastructure,
+            selected_category="mart",
+        )
+
+        self.assertEqual(cafe_results[0]["id"], 1)
+        self.assertEqual(mart_results[0]["id"], 2)
+
+    def test_selected_category_ignores_other_category_benefits_for_ranking(self):
+        cards = [
+            {
+                "id": 1,
+                "name": "Cafe Specialist",
+                "issuer": "Issuer",
+                "focus": ["cafe"],
+                "annual_fee": 0,
+                "previous_month_requirement": 0,
+                "benefits": [
+                    {
+                        "category": "cafe",
+                        "discount_type": "rate",
+                        "discount_rate": 0.1,
+                        "category_monthly_limit": 20000,
+                    }
+                ],
+            },
+            {
+                "id": 2,
+                "name": "Delivery Heavy",
+                "issuer": "Issuer",
+                "focus": ["cafe", "delivery"],
+                "annual_fee": 0,
+                "previous_month_requirement": 0,
+                "benefits": [
+                    {
+                        "category": "cafe",
+                        "discount_type": "rate",
+                        "discount_rate": 0.05,
+                        "category_monthly_limit": 20000,
+                    },
+                    {
+                        "category": "delivery",
+                        "discount_type": "rate",
+                        "discount_rate": 0.5,
+                        "category_monthly_limit": 100000,
+                    },
+                ],
+            },
+        ]
+        infrastructure = {"cafe": 20, "delivery": 0}
+
+        low_delivery = rank_card_recommendations(
+            cards=cards,
+            spending={"cafe": 100000, "delivery": 10000},
+            infrastructure=infrastructure,
+            previous_month_spending=500000,
+            selected_category="cafe",
+        )
+        high_delivery = rank_card_recommendations(
+            cards=cards,
+            spending={"cafe": 100000, "delivery": 500000},
+            infrastructure=infrastructure,
+            previous_month_spending=500000,
+            selected_category="cafe",
+        )
+
+        self.assertEqual([item["id"] for item in low_delivery], [1, 2])
+        self.assertEqual([item["id"] for item in high_delivery], [1, 2])
+        self.assertEqual(
+            low_delivery[0]["ranking_score"],
+            high_delivery[0]["ranking_score"],
+        )
+        self.assertEqual(low_delivery[0]["ranking_mode"], "category")
+        self.assertEqual(
+            low_delivery[0]["ranking_score"],
+            low_delivery[0]["category_scores"]["cafe"]["category_fit_score"],
+        )
+        self.assertGreater(
+            high_delivery[1]["estimated_net_value"],
+            high_delivery[0]["estimated_net_value"],
+        )
+
+    def test_overall_ranking_still_uses_all_category_benefits(self):
+        cards = [
+            {
+                "id": 1,
+                "name": "Cafe Specialist",
+                "issuer": "Issuer",
+                "focus": ["cafe"],
+                "annual_fee": 0,
+                "previous_month_requirement": 0,
+                "benefits": [
+                    {
+                        "category": "cafe",
+                        "discount_type": "rate",
+                        "discount_rate": 0.1,
+                    }
+                ],
+            },
+            {
+                "id": 2,
+                "name": "Delivery Heavy",
+                "issuer": "Issuer",
+                "focus": ["cafe", "delivery"],
+                "annual_fee": 0,
+                "previous_month_requirement": 0,
+                "benefits": [
+                    {
+                        "category": "cafe",
+                        "discount_type": "rate",
+                        "discount_rate": 0.05,
+                    },
+                    {
+                        "category": "delivery",
+                        "discount_type": "rate",
+                        "discount_rate": 0.5,
+                    },
+                ],
+            },
+        ]
+
+        results = rank_card_recommendations(
+            cards=cards,
+            spending={"cafe": 100000, "delivery": 500000},
+            infrastructure={"cafe": 20, "delivery": 0},
+            previous_month_spending=500000,
+        )
+
+        self.assertEqual(results[0]["id"], 2)
+        self.assertEqual(results[0]["ranking_mode"], "overall")
+        self.assertNotEqual(
+            results[0]["ranking_score"],
+            results[0]["category_fit_score"],
+        )
+
+    def test_overall_fit_uses_total_user_spending_ratios(self):
+        cards = [
+            {
+                "id": 1,
+                "name": "Cafe Only",
+                "issuer": "Issuer",
+                "focus": ["cafe"],
+                "discount_rate": 0.1,
+                "annual_fee": 0,
+                "previous_month_requirement": 0,
+            },
+            {
+                "id": 2,
+                "name": "Delivery Only",
+                "issuer": "Issuer",
+                "focus": ["delivery"],
+                "discount_rate": 0.1,
+                "annual_fee": 0,
+                "previous_month_requirement": 0,
+            },
+        ]
+
+        results = rank_card_recommendations(
+            cards=cards,
+            spending={"cafe": 100000, "delivery": 300000},
+            infrastructure={"cafe": 20, "delivery": 0},
+            previous_month_spending=400000,
+        )
+        by_id = {item["id"]: item for item in results}
+
+        self.assertEqual(by_id[1]["spending_benefit_fit"], 25.0)
+        self.assertEqual(by_id[2]["spending_benefit_fit"], 75.0)
+        self.assertLess(by_id[1]["spending_benefit_fit"], 100)
+
+    def test_overall_ranking_score_uses_60_25_15_components(self):
+        cards = [
+            {
+                "id": 1,
+                "name": "Cafe Card",
+                "issuer": "Issuer",
+                "focus": ["cafe"],
+                "discount_rate": 0.1,
+                "annual_fee": 0,
+                "previous_month_requirement": 0,
+            },
+            {
+                "id": 2,
+                "name": "Mart Card",
+                "issuer": "Issuer",
+                "focus": ["mart"],
+                "discount_rate": 0.05,
+                "annual_fee": 0,
+                "previous_month_requirement": 0,
+            },
+        ]
+
+        result = rank_card_recommendations(
+            cards=cards,
+            spending={"cafe": 100000, "mart": 100000},
+            infrastructure={"cafe": 20, "mart": 5},
+            previous_month_spending=200000,
+        )[0]
+        components = result["ranking_components"]
+        expected = round(
+            components["net_value_score"] * 0.60
+            + components["spending_benefit_fit"] * 0.25
+            + components["local_brand_fit"] * 0.15,
+            1,
+        )
+
+        self.assertEqual(result["ranking_mode"], "overall")
+        self.assertEqual(result["ranking_score"], expected)
+        self.assertEqual(result["seul_score"], expected)
+        self.assertEqual(
+            result["category_scores"]["cafe"]["category_benefit_score"],
+            result["category_scores"]["cafe"]["normalized_benefit_score"],
+        )
+        self.assertIn(
+            "local_brand_score",
+            result["category_scores"]["cafe"],
+        )
+
+    def test_graph_rerank_signal_breaks_ties_without_changing_net_value(self):
+        cards = [
+            {
+                "id": 1,
+                "name": "Low Graph Card",
+                "issuer": "Issuer",
+                "focus": ["cafe"],
+                "discount_rate": 0.1,
+                "annual_fee": 0,
+                "previous_month_requirement": 0,
+                "graph_rerank_score": 10.0,
+                "graph_top_category": "cafe",
+                "graph_matched_categories": ["cafe"],
+            },
+            {
+                "id": 2,
+                "name": "High Graph Card",
+                "issuer": "Issuer",
+                "focus": ["cafe"],
+                "discount_rate": 0.1,
+                "annual_fee": 0,
+                "previous_month_requirement": 0,
+                "graph_rerank_score": 90.0,
+                "graph_top_category": "cafe",
+                "graph_matched_categories": ["cafe"],
+            },
+        ]
+
+        results = rank_card_recommendations(
+            cards=cards,
+            spending={"cafe": 100000},
+            infrastructure={"cafe": 10},
+            previous_month_spending=100000,
+        )
+
+        self.assertEqual(results[0]["id"], 2)
+        self.assertEqual(results[0]["estimated_net_value"], 10000)
+        self.assertEqual(results[1]["estimated_net_value"], 10000)
+        self.assertEqual(results[0]["graph_rerank_score"], 90.0)
+        self.assertEqual(
+            results[0]["ranking_components"]["graph_rerank_score"],
+            90.0,
+        )

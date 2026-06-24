@@ -15,6 +15,7 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--apply", action="store_true")
+        parser.add_argument("--card-id", action="append", type=int)
 
     def handle(self, *args, **options):
         decisions = []
@@ -22,9 +23,12 @@ class Command(BaseCommand):
         activated = 0
 
         with transaction.atomic():
-            for card in CardProduct.objects.filter(
+            cards = CardProduct.objects.filter(
                 source_channel="card_gorilla",
-            ).prefetch_related("benefits"):
+            )
+            if options["card_id"]:
+                cards = cards.filter(pk__in=set(options["card_id"]))
+            for card in cards.prefetch_related("benefits"):
                 decision = evaluate_card_gorilla_activation(card)
                 decisions.append(decision)
                 blocker_counts.update(decision.card_blockers)

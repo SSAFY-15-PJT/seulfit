@@ -1106,6 +1106,12 @@ a {
   font-size: 12px;
 }
 
+.recommend-reason {
+  color: #315247;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .card-stat {
   display: grid;
   justify-items: end;
@@ -1303,6 +1309,16 @@ a {
   display: grid;
   align-content: start;
   gap: 16px;
+}
+
+.featured-reason {
+  border-left: 3px solid var(--green);
+  border-radius: 10px;
+  background: var(--green-soft);
+  color: #164b3d;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .featured-topline {
@@ -2165,6 +2181,67 @@ a {
 .check-box.off {
   border: 1px solid var(--line);
   background: var(--surface-muted);
+}
+
+.spending-dashboard {
+  display: grid;
+  gap: 12px;
+}
+
+.spending-total {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: linear-gradient(135deg, #f1fbf6, #ffffff);
+  padding: 14px;
+}
+
+.spending-total span,
+.spending-row small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.spending-total strong {
+  color: var(--green);
+  font-size: 20px;
+}
+
+.spending-row {
+  display: grid;
+  gap: 7px;
+}
+
+.spending-row div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.spending-row span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.spending-row strong {
+  font-size: 14px;
+}
+
+.spending-bar {
+  height: 9px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-muted);
+}
+
+.spending-bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--green), #8bc8a9);
 }
 
 .my-post {

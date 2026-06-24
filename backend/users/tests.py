@@ -4,10 +4,16 @@ from rest_framework.test import APIRequestFactory
 
 from finance.models import CardProduct, CardType, ParseStatus
 
-from .models import UserOwnedCard, UserProfile, UserUploadedReport
+from .models import (
+    UserConsumptionProfile,
+    UserOwnedCard,
+    UserProfile,
+    UserUploadedReport,
+)
 from .views import ConsumptionProfileUpsertView
 from .views import OwnedCardUpsertView
 from .views import ProfileView
+from .views import UploadedReportCreateView
 
 
 class ProfileViewTests(TestCase):
@@ -42,6 +48,12 @@ class ProfileViewTests(TestCase):
             file_type="pdf",
             parse_status=ParseStatus.RAW,
         )
+        UserConsumptionProfile.objects.create(
+            user=user,
+            source="image_parser",
+            spending_json={"cafe": 102000, "dining": 183000},
+            is_cold_start=False,
+        )
 
         request = APIRequestFactory().get("/api/v1/users/profile/")
         response = ProfileView.as_view()(request)
@@ -55,6 +67,14 @@ class ProfileViewTests(TestCase):
         self.assertEqual(
             response.data["uploaded_report"]["file_url"],
             "https://example.com/report.pdf",
+        )
+        self.assertEqual(
+            response.data["consumption_profile"]["source"],
+            "image_parser",
+        )
+        self.assertEqual(
+            response.data["consumption_profile"]["spending_json"]["dining"],
+            183000,
         )
 
     def test_profile_post_creates_or_updates_profile(self):
@@ -76,6 +96,29 @@ class ProfileViewTests(TestCase):
         self.assertEqual(
             get_user_model().objects.get(username="new").seulpick_profile.nickname,
             "새사용자",
+        )
+
+    def test_profile_view_returns_consumption_profile_without_user_profile(self):
+        user = get_user_model().objects.create_user(
+            username="vlm-only",
+            email="vlm-only@example.com",
+            password="secret",
+        )
+        UserConsumptionProfile.objects.create(
+            user=user,
+            source="image_parser",
+            spending_json={"cafe": 102000, "shopping": 44000},
+            is_cold_start=False,
+        )
+
+        request = APIRequestFactory().get("/api/v1/users/profile/")
+        response = ProfileView.as_view()(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["username"], "vlm-only")
+        self.assertEqual(
+            response.data["consumption_profile"]["spending_json"]["shopping"],
+            44000,
         )
 
     def test_owned_cards_post_creates_mappings(self):
@@ -132,3 +175,37 @@ class ProfileViewTests(TestCase):
             user.consumption_profile.spending_json,
             {"cafe": 100000},
         )
+
+    def test_uploaded_report_with_vlm_spending_updates_consumption_profile(self):
+        user = get_user_model().objects.create_user(
+            username="vlm-user",
+            email="vlm@example.com",
+            password="secret",
+        )
+
+        request = APIRequestFactory().post(
+            "/api/v1/users/reports/",
+            {
+                "user_id": user.id,
+                "file_url": "local-vlm-upload://user-1/report.png",
+                "file_type": "image/png",
+                "parse_status": ParseStatus.NORMALIZED,
+                "parsed_payload": {
+                    "spending": {
+                        "cafe": 102000,
+                        "convenience": 58000,
+                        "dining": 183000,
+                        "mart": 89000,
+                    }
+                },
+            },
+            format="json",
+        )
+        response = UploadedReportCreateView.as_view()(request)
+
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(response.data["consumption_profile_updated"])
+        profile = UserConsumptionProfile.objects.get(user=user)
+        self.assertEqual(profile.source, "image_parser")
+        self.assertFalse(profile.is_cold_start)
+        self.assertEqual(profile.spending_json["cafe"], 102000)

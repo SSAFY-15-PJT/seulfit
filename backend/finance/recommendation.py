@@ -1,5 +1,7 @@
 import re
-from math import tanh
+from math import log1p
+
+from .merchant_normalization import normalize_merchant_brand, normalize_scope_brand
 
 
 CATEGORY_LABELS = {
@@ -31,10 +33,14 @@ DEFAULT_COHORT_SPENDING = {
     "etc": 0,
 }
 OWNED_CARD_BADGE = "보유중인 카드"
+LOCAL_DENSITY_REFERENCE_COUNT = 50
 
 
 def calculate_store_weight(store_count):
-    return tanh(max(int(store_count or 0), 0) / 2)
+    count = max(_to_number(store_count, 0), 0)
+    if not count:
+        return 0
+    return min(log1p(count) / log1p(LOCAL_DENSITY_REFERENCE_COUNT), 1)
 
 
 def _to_number(value, default=0):
@@ -85,6 +91,32 @@ def resolve_spending_profile(spending=None, spending_source=None, fallback_spend
     }
 
 
+def resolve_previous_month_spending(previous_month_spending, spending_profile):
+    if previous_month_spending not in (None, ""):
+        return {
+            "amount": int(_to_number(previous_month_spending, 0)),
+            "source": "user",
+            "is_estimated": False,
+        }
+
+    amounts = spending_profile["amounts"]
+    canonical_categories = {
+        category
+        for category in amounts
+        if category != "food" or "dining" not in amounts
+    }
+    return {
+        "amount": int(
+            sum(
+                max(_to_number(amounts.get(category), 0), 0)
+                for category in canonical_categories
+            )
+        ),
+        "source": spending_profile["source"],
+        "is_estimated": True,
+    }
+
+
 def _transaction_benefit(rule, amount):
     minimum_amount = _to_number(rule.get("minimum_transaction_amount"), 0)
     if amount < minimum_amount:
@@ -112,6 +144,13 @@ def _normalize_merchant_name(value):
 
 
 def _matches_merchant_scope(merchant_name, merchant_scope):
+    merchant_brand = normalize_merchant_brand(merchant_name)
+    normalized_scope_brands = {
+        normalize_scope_brand(item) for item in merchant_scope or []
+    }
+    if merchant_brand and merchant_brand in normalized_scope_brands:
+        return True
+
     normalized_name = _normalize_merchant_name(merchant_name)
     if not normalized_name:
         return False
@@ -122,6 +161,155 @@ def _matches_merchant_scope(merchant_name, merchant_scope):
             _normalize_merchant_name(item) for item in merchant_scope or []
         )
     )
+
+
+def _infrastructure_entry(infrastructure, category):
+    aliases = [category]
+    if category == "dining":
+        aliases.append("food")
+    elif category == "food":
+        aliases.append("dining")
+
+    value = None
+    for key in aliases:
+        if key in (infrastructure or {}):
+            value = infrastructure[key]
+            break
+
+    if isinstance(value, dict):
+        merchant_counts = {}
+        for merchant, count in (value.get("merchant_counts") or {}).items():
+            canonical_name = normalize_scope_brand(merchant)
+            merchant_counts[canonical_name] = (
+                merchant_counts.get(canonical_name, 0)
+                + max(_to_number(count, 0), 0)
+            )
+        return {
+            "count": max(
+                _to_number(value.get("count", value.get("total_count")), 0),
+                0,
+            ),
+            "total_count": max(
+                _to_number(value.get("total_count", value.get("count")), 0),
+                0,
+            ),
+            "sample_count": max(_to_number(value.get("sample_count"), 0), 0),
+            "is_sampled": bool(value.get("is_sampled")),
+            "merchant_counts": merchant_counts,
+        }
+
+    count = max(_to_number(value, 0), 0)
+    return {
+        "count": count,
+        "total_count": count,
+        "sample_count": 0,
+        "is_sampled": False,
+        "merchant_counts": {},
+    }
+
+
+def _infrastructure_counts(infrastructure):
+    return {
+        category: _infrastructure_entry(infrastructure, category)["count"]
+        for category in CATEGORY_LABELS
+        if category not in {"food", "etc"}
+    }
+
+
+def calculate_local_accessibility(category, infrastructure):
+    entry = _infrastructure_entry(infrastructure, category)
+    category_count = entry["count"]
+    if category == "delivery" and not category_count:
+        return None
+    if not category_count:
+        return 0
+
+    counts = _infrastructure_counts(infrastructure)
+    total_store_count = sum(counts.values())
+    category_share = (
+        category_count / total_store_count if total_store_count else 0
+    )
+    density_score = calculate_store_weight(category_count)
+    return round((category_share * 0.6 + density_score * 0.4) * 100, 1)
+
+
+def calculate_merchant_accessibility(merchant_scope, category, infrastructure):
+    if not merchant_scope:
+        return None
+
+    entry = _infrastructure_entry(infrastructure, category)
+    sample_count = entry["sample_count"]
+    if not sample_count:
+        return None
+
+    normalized_scopes = set()
+    for merchant in merchant_scope:
+        normalized_merchant = normalize_scope_brand(merchant)
+        if normalized_merchant:
+            normalized_scopes.add(normalized_merchant)
+    matched_count = sum(
+        count
+        for merchant, count in entry["merchant_counts"].items()
+        if merchant in normalized_scopes
+    )
+    return round(min(matched_count / sample_count, 1) * 100, 1)
+
+
+def _potential_category_benefit(rule, spending):
+    potential_rule = {**rule, "merchant_scope": []}
+    return _category_benefit(
+        potential_rule,
+        spending,
+        transactions=None,
+    )["final_benefit"]
+
+
+def build_category_scores(benefits, breakdown, spending, infrastructure):
+    scores = {}
+    for rule, detail in zip(benefits, breakdown):
+        category = rule.get("category")
+        if not category:
+            continue
+
+        score = scores.setdefault(
+            category,
+            {
+                "estimated_benefit": 0,
+                "benefit_potential": 0,
+                "local_accessibility": calculate_local_accessibility(
+                    category,
+                    infrastructure,
+                ),
+                "merchant_accessibility": None,
+                "merchant_scope": [],
+                "normalized_benefit_score": 0,
+                "category_fit_score": 0,
+            },
+        )
+        score["estimated_benefit"] += detail["final_benefit"]
+        score["benefit_potential"] += _potential_category_benefit(
+            rule,
+            spending,
+        )
+
+        merchant_scope = rule.get("merchant_scope") or []
+        if merchant_scope:
+            score["merchant_scope"] = sorted(
+                {
+                    *score["merchant_scope"],
+                    *(normalize_scope_brand(item) for item in merchant_scope),
+                }
+            )
+
+    for category, score in scores.items():
+        score["estimated_benefit"] = int(score["estimated_benefit"])
+        score["benefit_potential"] = int(score["benefit_potential"])
+        score["merchant_accessibility"] = calculate_merchant_accessibility(
+            score["merchant_scope"],
+            category,
+            infrastructure,
+        )
+    return scores
 
 
 def _transaction_hour(value):
@@ -283,11 +471,23 @@ def _category_benefit(rule, spending, transactions=None):
     else:
         spending_amount = _to_number(spending.get(category), 0)
         if rule.get("discount_type", "rate") == "amount":
-            estimated_uses = int(_to_number(rule.get("estimated_monthly_uses"), 1))
-            if monthly_usage_limit:
-                estimated_uses = min(estimated_uses, monthly_usage_limit)
-            raw_benefit = _to_number(rule.get("discount_amount"), 0) * estimated_uses
-            transaction_count = estimated_uses
+            if spending_amount <= 0:
+                raw_benefit = 0
+                transaction_count = 0
+            else:
+                estimated_uses = int(
+                    _to_number(rule.get("estimated_monthly_uses"), 1)
+                )
+                if monthly_usage_limit:
+                    estimated_uses = min(
+                        estimated_uses,
+                        monthly_usage_limit,
+                    )
+                raw_benefit = (
+                    _to_number(rule.get("discount_amount"), 0)
+                    * estimated_uses
+                )
+                transaction_count = estimated_uses
         else:
             raw_benefit = spending_amount * _to_number(rule.get("discount_rate"), 0)
             per_transaction_limit = rule.get("per_transaction_limit")
@@ -372,11 +572,25 @@ def calculate_local_fit_score(benefits, spending, infrastructure):
         equal_weight = 1 / len(categories)
         weights = {category: equal_weight for category in categories}
 
-    weighted_fit = sum(
-        calculate_store_weight(infrastructure.get(category, 0)) * weights[category]
+    weighted_scores = [
+        (
+            calculate_local_accessibility(category, infrastructure),
+            weights[category],
+        )
         for category in categories
+    ]
+    available_scores = [
+        (score, weight)
+        for score, weight in weighted_scores
+        if score is not None
+    ]
+    total_weight = sum(weight for _, weight in available_scores)
+    if not total_weight:
+        return 0
+    return round(
+        sum(score * weight for score, weight in available_scores) / total_weight,
+        1,
     )
-    return round(weighted_fit * 100, 1)
 
 
 def select_benefit_tier(benefit_tiers, previous_month_spending, scope="card_total"):
@@ -530,11 +744,12 @@ def calculate_card_recommendation(
     card,
     spending=None,
     infrastructure=None,
-    previous_month_spending=0,
+    previous_month_spending=None,
     owned_card_ids=None,
     transactions=None,
     spending_source=None,
     fallback_spending=None,
+    selected_category=None,
 ):
     infrastructure = infrastructure or DEFAULT_INFRASTRUCTURE
     owned_card_ids = set(owned_card_ids or [])
@@ -544,11 +759,16 @@ def calculate_card_recommendation(
         fallback_spending=fallback_spending,
     )
     resolved_spending = spending_profile["amounts"]
+    previous_month_spending_profile = resolve_previous_month_spending(
+        previous_month_spending,
+        spending_profile,
+    )
+    resolved_previous_month_spending = previous_month_spending_profile["amount"]
 
     previous_month_requirement = int(_to_number(card.get("previous_month_requirement"), 0))
     selected_tier = select_benefit_tier(
         card.get("benefit_tiers"),
-        previous_month_spending,
+        resolved_previous_month_spending,
     )
     tier_limit = selected_tier.get("monthly_discount_limit") if selected_tier else None
     monthly_discount_limit = int(
@@ -566,7 +786,7 @@ def calculate_card_recommendation(
         else None
     )
     monthly_annual_fee = round(annual_fee / 12) if annual_fee is not None else None
-    is_eligible = _to_number(previous_month_spending, 0) >= previous_month_requirement
+    is_eligible = resolved_previous_month_spending >= previous_month_requirement
 
     benefits = _benefit_rules_for(card)
     breakdown = [
@@ -575,7 +795,7 @@ def calculate_card_recommendation(
     selected_service_limit_tiers = apply_service_group_limits(
         breakdown,
         card.get("service_limit_tiers"),
-        previous_month_spending,
+        resolved_previous_month_spending,
     )
     uncapped_benefit = sum(item["final_benefit"] for item in breakdown)
     estimated_gross_benefit = (
@@ -593,6 +813,12 @@ def calculate_card_recommendation(
     )
     local_fit_score = calculate_local_fit_score(
         benefits=benefits,
+        spending=resolved_spending,
+        infrastructure=infrastructure,
+    )
+    category_scores = build_category_scores(
+        benefits=benefits,
+        breakdown=breakdown,
         spending=resolved_spending,
         infrastructure=infrastructure,
     )
@@ -631,9 +857,18 @@ def calculate_card_recommendation(
         ),
         "selected_service_limit_tiers": selected_service_limit_tiers,
         "local_fit_score": local_fit_score,
+        "graph_rerank_score": round(_to_number(card.get("graph_rerank_score"), 0), 1),
+        "graph_top_category": card.get("graph_top_category"),
+        "graph_matched_categories": card.get("graph_matched_categories", []),
+        "graph_category_store_counts": card.get("graph_category_store_counts", {}),
+        "graph_category_shares": card.get("graph_category_shares", {}),
+        "category_fit_score": 0,
+        "selected_category": selected_category,
+        "category_scores": category_scores,
         "seul_score": 0,
         "monthly_discount_limit": monthly_discount_limit,
         "previous_month_requirement": previous_month_requirement,
+        "previous_month_spending_profile": previous_month_spending_profile,
         "is_eligible": is_eligible,
         "is_recommendation_ready": is_eligible and annual_fee is not None,
         "is_owned": is_owned,
@@ -655,41 +890,205 @@ def calculate_card_recommendation(
     return result
 
 
-def _apply_seul_scores(recommendations):
+def _spending_ratios(item):
+    spending = item.get("spending_profile", {}).get("amounts", {})
+    categories = {
+        category
+        for category in spending
+        if category != "food" or "dining" not in spending
+    }
+    total_spending = sum(
+        max(_to_number(spending.get(category), 0), 0)
+        for category in categories
+    )
+    if not total_spending:
+        return {}
+    return {
+        category: max(_to_number(spending.get(category), 0), 0)
+        / total_spending
+        for category in categories
+    }
+
+
+def _category_local_brand_score(category_score):
+    local_accessibility = category_score.get("local_accessibility")
+    merchant_accessibility = category_score.get("merchant_accessibility")
+    has_merchant_scope = bool(category_score.get("merchant_scope"))
+
+    if not has_merchant_scope:
+        return local_accessibility if local_accessibility is not None else 0
+    if merchant_accessibility is not None and local_accessibility is not None:
+        return merchant_accessibility * 0.625 + local_accessibility * 0.375
+    if merchant_accessibility is not None:
+        return merchant_accessibility
+    if local_accessibility is not None:
+        return local_accessibility
+    return 0
+
+
+def _overall_fit_components(item):
+    spending_ratios = _spending_ratios(item)
+    spending_benefit_fit = 0
+    local_brand_fit = 0
+
+    for category, category_score in item.get("category_scores", {}).items():
+        ratio = spending_ratios.get(category, 0)
+        spending_benefit_fit += (
+            ratio * category_score.get("normalized_benefit_score", 0)
+        )
+        local_brand_fit += (
+            ratio * category_score.get("local_brand_score", 0)
+        )
+
+    return round(spending_benefit_fit, 1), round(local_brand_fit, 1)
+
+
+def _category_ranking_score(category_score):
+    if not category_score:
+        return 0
+
+    benefit_score = category_score.get("normalized_benefit_score", 0)
+    local_accessibility = category_score.get("local_accessibility")
+    merchant_accessibility = category_score.get("merchant_accessibility")
+    has_merchant_scope = bool(category_score.get("merchant_scope"))
+
+    if has_merchant_scope:
+        if merchant_accessibility is not None and local_accessibility is not None:
+            return (
+                benefit_score * 0.60
+                + merchant_accessibility * 0.25
+                + local_accessibility * 0.15
+            )
+        if merchant_accessibility is not None:
+            return benefit_score * 0.75 + merchant_accessibility * 0.25
+        if local_accessibility is not None:
+            return benefit_score * 0.75 + local_accessibility * 0.25
+        return benefit_score
+
+    if local_accessibility is not None:
+        return benefit_score * 0.75 + local_accessibility * 0.25
+    return benefit_score
+
+
+def _apply_seul_scores(recommendations, selected_category=None):
     eligible_net_values = [
         max(item["estimated_net_value"], 0)
         for item in recommendations
         if item["is_recommendation_ready"]
     ]
     max_net_value = max(eligible_net_values, default=0)
-    max_local_fit = max(
-        (item["local_fit_score"] for item in recommendations if item["is_recommendation_ready"]),
-        default=0,
-    )
+    categories = {
+        category
+        for item in recommendations
+        for category in (item.get("category_scores") or {})
+    }
+    max_category_benefits = {
+        category: max(
+            (
+                item["category_scores"][category]["benefit_potential"]
+                for item in recommendations
+                if item["is_recommendation_ready"]
+                and category in item.get("category_scores", {})
+            ),
+            default=0,
+        )
+        for category in categories
+    }
 
     for item in recommendations:
-        if not item["is_recommendation_ready"] or max_net_value == 0:
+        for category, category_score in item.get("category_scores", {}).items():
+            max_benefit = max_category_benefits.get(category, 0)
+            normalized_benefit = (
+                category_score["benefit_potential"] / max_benefit * 100
+                if max_benefit
+                else 0
+            )
+            category_score["normalized_benefit_score"] = round(
+                normalized_benefit,
+                1,
+            )
+            category_score["category_benefit_score"] = round(
+                normalized_benefit,
+                1,
+            )
+            category_score["local_brand_score"] = round(
+                _category_local_brand_score(category_score),
+                1,
+            )
+            category_fit_score = _category_ranking_score(category_score)
+            category_score["category_fit_score"] = round(
+                category_fit_score,
+                1,
+            )
+
+        if selected_category:
+            category_fit_score = (
+                item.get("category_scores", {})
+                .get(selected_category, {})
+                .get("category_fit_score", 0)
+            )
+            ranking_mode = "category"
+            spending_benefit_fit = 0
+            local_brand_fit = 0
+        else:
+            spending_benefit_fit, local_brand_fit = _overall_fit_components(
+                item
+            )
+            category_fit_score = spending_benefit_fit
+            ranking_mode = "overall"
+        item["category_fit_score"] = round(category_fit_score, 1)
+        item["spending_benefit_fit"] = spending_benefit_fit
+        item["local_brand_fit"] = local_brand_fit
+        item["ranking_mode"] = ranking_mode
+
+        if not item["is_recommendation_ready"]:
             item["seul_score"] = 0
             item["ranking_score"] = 0
+            item["ranking_components"] = {
+                "net_value_score": 0,
+                "category_fit_score": round(category_fit_score, 1),
+                "local_fit_score": item["local_fit_score"],
+                "graph_rerank_score": item.get("graph_rerank_score", 0),
+                "spending_benefit_fit": spending_benefit_fit,
+                "local_brand_fit": local_brand_fit,
+            }
             continue
 
-        net_value_score = max(item["estimated_net_value"], 0) / max_net_value * 100
-        local_fit_score = (
-            item["local_fit_score"] / max_local_fit * 100 if max_local_fit else 0
+        net_value_score = (
+            max(item["estimated_net_value"], 0) / max_net_value * 100
+            if max_net_value
+            else 0
         )
-        item["ranking_score"] = round(net_value_score * 0.6 + local_fit_score * 0.4, 1)
+        if selected_category:
+            ranking_score = category_fit_score
+        else:
+            ranking_score = (
+                net_value_score * 0.60
+                + spending_benefit_fit * 0.25
+                + local_brand_fit * 0.15
+            )
+        item["ranking_score"] = round(ranking_score, 1)
         item["seul_score"] = item["ranking_score"]
+        item["ranking_components"] = {
+            "net_value_score": round(net_value_score, 1),
+            "category_fit_score": round(category_fit_score, 1),
+            "local_fit_score": item["local_fit_score"],
+            "graph_rerank_score": item.get("graph_rerank_score", 0),
+            "spending_benefit_fit": spending_benefit_fit,
+            "local_brand_fit": local_brand_fit,
+        }
 
 
 def rank_card_recommendations(
     cards,
     spending=None,
     infrastructure=None,
-    previous_month_spending=0,
+    previous_month_spending=None,
     owned_card_ids=None,
     transactions=None,
     spending_source=None,
     fallback_spending=None,
+    selected_category=None,
 ):
     recommendations = [
         calculate_card_recommendation(
@@ -701,16 +1100,21 @@ def rank_card_recommendations(
             transactions=transactions,
             spending_source=spending_source,
             fallback_spending=fallback_spending,
+            selected_category=selected_category,
         )
         for card in cards
     ]
-    _apply_seul_scores(recommendations)
+    _apply_seul_scores(
+        recommendations,
+        selected_category=selected_category,
+    )
     return sorted(
         recommendations,
         key=lambda item: (
             item["is_eligible"],
             item["is_recommendation_ready"],
             item.get("ranking_score", 0),
+            item.get("graph_rerank_score", 0),
             item["local_fit_score"],
             item["estimated_net_value"]
             if item["estimated_net_value"] is not None

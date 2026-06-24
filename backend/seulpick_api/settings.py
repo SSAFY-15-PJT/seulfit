@@ -75,6 +75,12 @@ MEDIA_ROOT = BASE_DIR / "media"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 KAKAO_REST_API_KEY = os.getenv("KAKAO_REST_API_KEY") or os.getenv("KAKAO_API_KEY", "")
+VLM_API_URL = os.getenv("VLM_API_URL", "")
+VLM_API_KEY = os.getenv("VLM_API_KEY") or os.getenv("GMS_KEY", "")
+VLM_MODEL = os.getenv("VLM_MODEL", "")
+VLM_API_TYPE = os.getenv("VLM_API_TYPE", "chat_completions")
+VLM_GMS_COMPAT = os.getenv("VLM_GMS_COMPAT", "").lower() in {"1", "true", "yes", "on"}
+VLM_GMS_STRICT = os.getenv("VLM_GMS_STRICT", "").lower() in {"1", "true", "yes", "on"}
 NEO4J_HTTP_URI = os.getenv("NEO4J_HTTP_URI", "http://localhost:7474")
 NEO4J_DATABASE = os.getenv("NEO4J_DATABASE", "neo4j")
 NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
@@ -86,6 +92,8 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:5174",
     "http://127.0.0.1:5174",
 ]
+CORS_ALLOW_CREDENTIALS = True
+CSRF_TRUSTED_ORIGINS = CORS_ALLOWED_ORIGINS
 
 REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],

@@ -1,7 +1,11 @@
+from decimal import Decimal
+
 from django.test import TestCase
 
 from finance.card_gorilla_activation import (
     apply_card_gorilla_activation,
+    collect_display_only_conditions,
+    evaluate_benefit_for_activation,
     evaluate_card_gorilla_activation,
 )
 from finance.models import (
@@ -159,7 +163,7 @@ class CardGorillaActivationTests(TestCase):
         blockers = next(iter(decision.blocked_benefits.values()), [])
         self.assertNotIn("channel_unparsed", blockers)
 
-    def test_payment_method_condition_stays_in_review(self):
+    def test_payment_method_condition_can_activate_as_display_only(self):
         card = self.create_card()
         BenefitRule.objects.create(
             card=card,
@@ -175,8 +179,14 @@ class CardGorillaActivationTests(TestCase):
 
         decision = evaluate_card_gorilla_activation(card)
 
-        blockers = next(iter(decision.blocked_benefits.values()))
-        self.assertIn("payment_method_condition", blockers)
+        self.assertTrue(decision.can_activate)
+        self.assertTrue(apply_card_gorilla_activation(card, decision))
+        benefit = card.benefits.get()
+        self.assertEqual(benefit.parse_status, ParseStatus.ACTIVE)
+        self.assertEqual(
+            benefit.unsupported_conditions,
+            ["payment_method_condition"],
+        )
 
     def test_universal_category_benefit_can_activate_despite_standard_exclusions(self):
         card = self.create_card()
@@ -193,3 +203,48 @@ class CardGorillaActivationTests(TestCase):
         decision = evaluate_card_gorilla_activation(card)
 
         self.assertTrue(decision.can_activate)
+
+    def test_statement_period_tilde_is_not_variable_rate(self):
+        card = self.create_card()
+        benefit = BenefitRule.objects.create(
+            card=card,
+            category="delivery",
+            discount_type=DiscountType.RATE,
+            discount_rate=Decimal("0.1"),
+            minimum_transaction_amount=20000,
+            category_monthly_limit=5000,
+            merchant_scope=["배달의민족"],
+            raw_text=(
+                "배달의민족 10% 할인, 지난달 1일 ~ 말일까지 "
+                "50만원 이상 이용 시 제공"
+            ),
+            parse_status=ParseStatus.REVIEW_REQUIRED,
+            unsupported_conditions=["source_review_required"],
+        )
+
+        blockers = evaluate_benefit_for_activation(benefit)
+
+        self.assertNotIn("variable_rate", blockers)
+        self.assertEqual(blockers, [])
+
+    def test_payment_method_condition_is_preserved_as_display_only(self):
+        card = self.create_card()
+        benefit = BenefitRule.objects.create(
+            card=card,
+            category="shopping",
+            discount_type=DiscountType.RATE,
+            discount_rate=Decimal("0.1"),
+            minimum_transaction_amount=20000,
+            category_monthly_limit=5000,
+            raw_text="모든 간편결제 이용금액은 혜택이 제공되지 않습니다.",
+            parse_status=ParseStatus.REVIEW_REQUIRED,
+            unsupported_conditions=["source_review_required"],
+        )
+
+        blockers = evaluate_benefit_for_activation(benefit)
+
+        self.assertNotIn("payment_method_condition", blockers)
+        self.assertIn(
+            "payment_method_condition",
+            collect_display_only_conditions(benefit),
+        )

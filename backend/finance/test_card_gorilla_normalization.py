@@ -6,6 +6,7 @@ from finance.card_gorilla_normalization import (
     parse_benefit,
     parse_card_gorilla_payload,
     parse_category_monthly_limit,
+    parse_category_specific_limits,
     parse_minimum_transaction_amount,
     parse_channel_condition,
 )
@@ -136,6 +137,35 @@ class CardGorillaNormalizationTests(SimpleTestCase):
                 "월 할인횟수 1회 (월 할인한도 1천원 이내 제공)"
             ),
             1000,
+        )
+        self.assertEqual(
+            parse_category_monthly_limit(
+                "할인한도: 5,000원 - 2만원 이상 결제 시 제공"
+            ),
+            5000,
+        )
+
+    def test_trailing_payment_minimum_is_parsed(self):
+        self.assertEqual(
+            parse_minimum_transaction_amount(
+                "할인한도 5천원, 2만원 이상 결제 건에 대해 제공"
+            ),
+            20000,
+        )
+
+    def test_category_specific_limit_is_parsed_from_shared_service(self):
+        text = (
+            "커피전문점 5% 캐시백(월 2천원, 2회 한) "
+            "편의점 5% 캐시백(월 1천원, 2회 한)"
+        )
+
+        self.assertEqual(
+            parse_category_specific_limits("cafe", text),
+            (2000, 2),
+        )
+        self.assertEqual(
+            parse_category_specific_limits("convenience", text),
+            (1000, 2),
         )
 
     def test_multiple_monthly_limits_are_not_guessed(self):

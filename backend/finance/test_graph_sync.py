@@ -42,8 +42,12 @@ class GraphSyncTests(TestCase):
         BenefitRule.objects.create(
             card=card,
             category="cafe",
+            benefit_group="life_service",
             discount_type=DiscountType.RATE,
             discount_rate="0.1",
+            per_transaction_limit=3000,
+            daily_usage_limit=1,
+            estimated_monthly_uses=5,
             raw_text="카페 10%",
             parse_status=ParseStatus.ACTIVE,
         )
@@ -74,7 +78,12 @@ class GraphSyncTests(TestCase):
         self.assertEqual(len(payload.cards), 1)
         self.assertEqual(len(payload.benefits), 1)
         self.assertEqual(payload.cards[0]["name"], "활성 카드")
+        self.assertEqual(payload.cards[0]["monthly_discount_limit"], None)
         self.assertEqual(payload.benefits[0]["category"], "cafe")
+        self.assertEqual(payload.benefits[0]["benefit_group"], "life_service")
+        self.assertEqual(payload.benefits[0]["per_transaction_limit"], 3000)
+        self.assertEqual(payload.benefits[0]["daily_usage_limit"], 1)
+        self.assertEqual(payload.benefits[0]["estimated_monthly_uses"], 5)
         self.assertEqual(len(build_graph_statements(payload)), 4)
 
     @override_settings(

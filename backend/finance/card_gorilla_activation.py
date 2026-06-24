@@ -21,7 +21,7 @@ COMPLEX_PATTERNS = {
         "평일",
         "요일",
     ),
-    "variable_rate": ("최대 ", "~", "브랜드별", "적립율 구분"),
+    "variable_rate": ("브랜드별", "적립율 구분"),
 }
 
 DISPLAY_ONLY_CONDITIONS = {
@@ -56,13 +56,12 @@ def evaluate_benefit_for_activation(benefit):
     for reason, patterns in COMPLEX_PATTERNS.items():
         if any(pattern in text for pattern in patterns):
             blockers.append(reason)
+    if re.search(r"\d+(?:\.\d+)?\s*%\s*[~-]\s*\d+(?:\.\d+)?\s*%", text):
+        blockers.append("variable_rate")
 
     unsupported = set(benefit.unsupported_conditions or [])
     if "mixed_channel_mapping" in unsupported:
         blockers.append("channel_unparsed")
-    if "payment_method_condition" in unsupported:
-        blockers.append("payment_method_condition")
-
     has_monthly_limit_text = bool(
         re.search(
             r"(?:월\s*(?:할인|적립|캐시백)?\s*한도|월\s*최대\s*"
@@ -143,6 +142,9 @@ def collect_display_only_conditions(benefit):
             "사이렌오더",
             "삼성페이 결제",
         )
+    ) or re.search(
+        r"(?:모든\s*)?간편결제.*(?:제외|제공되지\s*않)",
+        text,
     ):
         conditions.add("payment_method_condition")
     return sorted(conditions & DISPLAY_ONLY_CONDITIONS)
@@ -183,8 +185,14 @@ def apply_card_gorilla_activation(card, decision):
 
     card.benefits.filter(pk__in=decision.activatable_benefit_ids).update(
         parse_status=ParseStatus.ACTIVE,
-        unsupported_conditions=[],
     )
+    for benefit in card.benefits.filter(
+        pk__in=decision.activatable_benefit_ids
+    ):
+        benefit.unsupported_conditions = collect_display_only_conditions(benefit)
+        benefit.save(
+            update_fields=["unsupported_conditions", "updated_at"]
+        )
     card.parse_status = ParseStatus.ACTIVE
     card.review_reasons = [
         "일부 복잡한 혜택은 추천 계산에서 제외됨"

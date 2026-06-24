@@ -8,6 +8,20 @@ from django.conf import settings
 from .models import CardProduct, ParseStatus
 
 
+GRAPH_KEY_PREFIX = "seulpick"
+
+
+def build_card_graph_key(card):
+    return f"{GRAPH_KEY_PREFIX}:{card.source_channel}:{card.external_id}"
+
+
+def parse_card_graph_key(card_key):
+    parts = str(card_key).split(":", 2)
+    if len(parts) != 3 or parts[0] != GRAPH_KEY_PREFIX:
+        return None
+    return {"source_channel": parts[1], "external_id": parts[2]}
+
+
 CARD_QUERY = """
 UNWIND $cards AS card
 MERGE (c:Card {key: card.key})
@@ -17,6 +31,7 @@ SET c.name = card.name,
     c.card_type = card.card_type,
     c.annual_fee = card.annual_fee,
     c.previous_month_requirement = card.previous_month_requirement,
+    c.monthly_discount_limit = card.monthly_discount_limit,
     c.source_url = card.source_url,
     c.image_url = card.image_url,
     c.updated_at = datetime()
@@ -27,12 +42,16 @@ UNWIND $benefits AS benefit
 MATCH (c:Card {key: benefit.card_key})
 MERGE (b:Benefit {key: benefit.key})
 SET b.discount_type = benefit.discount_type,
+    b.benefit_group = benefit.benefit_group,
     b.discount_rate = benefit.discount_rate,
     b.discount_amount = benefit.discount_amount,
     b.minimum_transaction_amount = benefit.minimum_transaction_amount,
     b.maximum_transaction_amount = benefit.maximum_transaction_amount,
+    b.per_transaction_limit = benefit.per_transaction_limit,
     b.daily_benefit_limit = benefit.daily_benefit_limit,
+    b.daily_usage_limit = benefit.daily_usage_limit,
     b.monthly_usage_limit = benefit.monthly_usage_limit,
+    b.estimated_monthly_uses = benefit.estimated_monthly_uses,
     b.category_monthly_limit = benefit.category_monthly_limit,
     b.merchant_scope = benefit.merchant_scope,
     b.channel = benefit.channel,
@@ -79,7 +98,7 @@ def build_graph_sync_payload():
         )
         if card.annual_fee is None or not active_benefits:
             continue
-        card_key = f"seulpick:{card.source_channel}:{card.external_id}"
+        card_key = build_card_graph_key(card)
         primary_image = card.images.filter(is_primary=True).first()
         cards.append(
             {
@@ -90,6 +109,7 @@ def build_graph_sync_payload():
                 "card_type": card.card_type,
                 "annual_fee": card.annual_fee,
                 "previous_month_requirement": card.previous_month_requirement,
+                "monthly_discount_limit": card.monthly_discount_limit,
                 "source_url": card.source_url,
                 "image_url": (
                     primary_image.source_url if primary_image else ""
@@ -102,6 +122,7 @@ def build_graph_sync_payload():
                     "key": f"{card_key}:benefit:{benefit.pk}",
                     "card_key": card_key,
                     "category": benefit.category,
+                    "benefit_group": benefit.benefit_group,
                     "discount_type": benefit.discount_type,
                     "discount_rate": (
                         float(benefit.discount_rate)
@@ -115,8 +136,11 @@ def build_graph_sync_payload():
                     "maximum_transaction_amount": (
                         benefit.maximum_transaction_amount
                     ),
+                    "per_transaction_limit": benefit.per_transaction_limit,
                     "daily_benefit_limit": benefit.daily_benefit_limit,
+                    "daily_usage_limit": benefit.daily_usage_limit,
                     "monthly_usage_limit": benefit.monthly_usage_limit,
+                    "estimated_monthly_uses": benefit.estimated_monthly_uses,
                     "category_monthly_limit": benefit.category_monthly_limit,
                     "merchant_scope": benefit.merchant_scope,
                     "channel": benefit.channel,

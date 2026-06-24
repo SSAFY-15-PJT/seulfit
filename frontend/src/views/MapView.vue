@@ -162,7 +162,7 @@
                       </div>
                       <div class="benefit-line">
                         <span>Seul-Score</span>
-                        <strong>{{ formatScore(currentCard.seul_score) }}</strong>
+                        <strong>{{ displayCategoryScore(currentCard, selectedCategoryKey) }}</strong>
                       </div>
                     </div>
 
@@ -171,6 +171,10 @@
                         {{ line }}
                       </p>
                     </div>
+
+                    <p class="featured-reason">
+                      {{ recommendationReason(currentCard, selectedCategoryKey) }}
+                    </p>
 
                     <div class="condition-strip">
                       <span v-if="currentCard.previous_month_requirement">
@@ -315,26 +319,27 @@ const DEFAULT_CENTER = { lat: 37.4979, lng: 127.0276, label: "강남역" };
 const BACKEND_ORIGIN = import.meta.env.VITE_BACKEND_ORIGIN || "http://127.0.0.1:8001";
 
 const categoryOrder = [
+  { key: "all", label: "전체" },
   { key: "cafe", label: "카페" },
   { key: "convenience", label: "편의점" },
   { key: "dining", label: "외식" },
   { key: "delivery", label: "배달" },
   { key: "mart", label: "마트" },
   { key: "shopping", label: "쇼핑" },
-  { key: "etc", label: "기타" },
 ];
 
 const categoryLabels = Object.fromEntries(categoryOrder.map((item) => [item.key, item.label]));
 const categoryIcons = {
+  all: "◎",
   cafe: "☕",
   convenience: "🏪",
   dining: "🍽️",
   delivery: "🛵",
   mart: "🛒",
   shopping: "🛍️",
-  etc: "✨",
 };
 const focusKeyAliases = {
+  카페: "cafe",
   cafe: "cafe",
   편의점: "convenience",
   convenience: "convenience",
@@ -360,7 +365,7 @@ const loading = ref(false);
 const recommending = ref(false);
 const selectedPoint = reactive({ lat: DEFAULT_CENTER.lat, lng: DEFAULT_CENTER.lng });
 const recommendationResult = ref(null);
-const activeCategory = ref("cafe");
+const activeCategory = ref("all");
 const recommendationType = ref("credit");
 const activeSlideIndex = ref(0);
 
@@ -589,8 +594,21 @@ function categoryIcon(key) {
   return categoryIcons[key] || "•";
 }
 
-function sortCards(list) {
+function sortCards(list, categoryKey) {
   return [...list].sort((left, right) => {
+    const readinessDiff =
+      Number(Boolean(right.is_recommendation_ready)) -
+      Number(Boolean(left.is_recommendation_ready));
+    if (readinessDiff) return readinessDiff;
+    const eligibilityDiff =
+      Number(Boolean(right.is_eligible)) - Number(Boolean(left.is_eligible));
+    if (eligibilityDiff) return eligibilityDiff;
+    if (categoryKey !== "all") {
+      const categoryScoreDiff =
+        Number(right.category_scores?.[categoryKey]?.category_fit_score || 0) -
+        Number(left.category_scores?.[categoryKey]?.category_fit_score || 0);
+      if (categoryScoreDiff) return categoryScoreDiff;
+    }
     const scoreDiff = Number(right.seul_score || 0) - Number(left.seul_score || 0);
     if (scoreDiff) return scoreDiff;
     const valueDiff =
@@ -603,8 +621,39 @@ function sortCards(list) {
   });
 }
 
+function displayCategoryScore(card, categoryKey) {
+  if (categoryKey === "all") {
+    return formatScore(card?.seul_score);
+  }
+  const categoryScore = card?.category_scores?.[categoryKey]?.category_fit_score;
+  return formatScore(categoryScore ?? card?.seul_score);
+}
+
+function topBenefitCategory(card) {
+  const entries = Object.entries(card?.category_scores || {});
+  if (!entries.length) return null;
+  return entries.sort(
+    ([, left], [, right]) =>
+      Number(right?.benefit_potential || 0) - Number(left?.benefit_potential || 0),
+  )[0]?.[0];
+}
+
+function recommendationReason(card, categoryKey) {
+  if (!card?.name) return "추천 근거를 계산 중입니다.";
+  if (categoryKey === "all") {
+    const topCategory = topBenefitCategory(card);
+    const categoryLabel = categoryLabels[topCategory] || "주요 카테고리";
+    return `${categoryLabel} 소비와 혜택 구성이 맞고, 월 예상 순혜택 ${formatWon(card.estimated_net_value)} 기준으로 추천됐습니다.`;
+  }
+  const score = card.category_scores?.[categoryKey]?.category_fit_score;
+  return `${categoryLabels[categoryKey] || categoryKey} 혜택 점수 ${formatScore(score)}점과 주변 이용 가능성을 함께 반영했습니다.`;
+}
+
 function benefitEntry(card, categoryKey) {
   const breakdown = Array.isArray(card.calculation_breakdown) ? card.calculation_breakdown : [];
+  if (categoryKey === "all") {
+    return breakdown[0] || null;
+  }
   return breakdown.find((item) => item.category === categoryKey) || breakdown[0] || null;
 }
 
@@ -614,7 +663,10 @@ function benefitHeadline(card, categoryKey) {
     return "혜택 정보가 없습니다.";
   }
 
-  const categoryLabel = target.category_label || categoryLabels[categoryKey] || categoryKey;
+  const categoryLabel =
+    categoryKey === "all"
+      ? target.category_label || "전체"
+      : target.category_label || categoryLabels[categoryKey] || categoryKey;
   if (target.discount_type === "amount") {
     const cap = target.category_monthly_limit != null ? ` · 월 한도 ${formatWon(target.category_monthly_limit)}` : "";
     return `${categoryLabel} ${formatWon(target.discount_amount)} 정액 할인${cap}`;
@@ -632,7 +684,9 @@ function benefitDetails(card, categoryKey) {
   if (!target) return ["카테고리 혜택 정보가 없습니다."];
 
   const lines = [];
-  lines.push(`${target.category_label || categoryLabels[categoryKey] || categoryKey} 혜택`);
+  lines.push(
+    `${target.category_label || categoryLabels[categoryKey] || "전체"} 혜택`,
+  );
   if (target.benefit_group) {
     lines.push(`혜택 그룹 ${target.benefit_group}`);
   }
@@ -686,6 +740,10 @@ const rankingCards = computed(() => {
     local_fit_score: Number(card.local_fit_score || 0),
     image_url: resolveImageUrl(card.image_url || ""),
     is_owned: Boolean(card.is_owned),
+    category_scores:
+      card.category_scores && typeof card.category_scores === "object"
+        ? card.category_scores
+        : {},
     calculation_breakdown: Array.isArray(card.calculation_breakdown) ? card.calculation_breakdown : [],
   }));
 });
@@ -699,7 +757,9 @@ const categoryBuckets = computed(() => {
   );
 
   for (const card of rankingCards.value) {
-    const focusList = card.focus.length ? card.focus : ["etc"];
+    buckets.all.all.push(card);
+    buckets.all[card.card_type === "debit" ? "debit" : "credit"].push(card);
+    const focusList = card.focus.length ? card.focus : [];
     for (const focus of focusList) {
       if (!buckets[focus]) continue;
       buckets[focus].all.push(card);
@@ -708,9 +768,9 @@ const categoryBuckets = computed(() => {
   }
 
   for (const bucket of Object.values(buckets)) {
-    bucket.credit = sortCards(bucket.credit);
-    bucket.debit = sortCards(bucket.debit);
-    bucket.all = sortCards(bucket.all);
+    bucket.credit = sortCards(bucket.credit, bucket.key);
+    bucket.debit = sortCards(bucket.debit, bucket.key);
+    bucket.all = sortCards(bucket.all, bucket.key);
   }
 
   return buckets;
@@ -733,22 +793,28 @@ const categorySummary = computed(() =>
   }),
 );
 
-const visibleCategories = computed(() => categorySummary.value.filter((item) => item.totalCount > 0));
+const visibleCategories = computed(() =>
+  categorySummary.value.filter((item) => item.key === "all" || item.totalCount > 0),
+);
 
 watch(
   categorySummary,
   (items) => {
     const nextActive =
-      items.find((item) => item.key === activeCategory.value && item.totalCount > 0)?.key ||
+      items.find(
+        (item) =>
+          item.key === activeCategory.value &&
+          (item.key === "all" || item.totalCount > 0),
+      )?.key ||
       items.find((item) => item.totalCount > 0)?.key ||
       items[0]?.key ||
-      "cafe";
+      "all";
     activeCategory.value = nextActive;
   },
   { immediate: true },
 );
 
-const selectedCategoryKey = computed(() => activeCategory.value || "cafe");
+const selectedCategoryKey = computed(() => activeCategory.value || "all");
 const selectedCategoryLabel = computed(() => categoryLabels[selectedCategoryKey.value] || "카테고리");
 const selectedBucket = computed(
   () =>
@@ -786,7 +852,10 @@ watch(
   recommendationResult,
   async (value) => {
     if (!value) return;
-    const nextCategory = categorySummary.value.find((item) => item.totalCount > 0)?.key || "cafe";
+    const nextCategory =
+      categorySummary.value.find((item) => item.key === "all")?.key ||
+      categorySummary.value.find((item) => item.totalCount > 0)?.key ||
+      "all";
     activeCategory.value = nextCategory;
     recommendationType.value = "credit";
     await nextTick();
@@ -802,9 +871,37 @@ async function runRecommendation() {
   recommending.value = true;
   mapError.value = "";
   try {
-    const result = await simulateCards({
+    const payload = {
+      // Temporary local VLM demo user. Replace with authenticated user_id later.
+      user_id: 1,
+      area_id: map.value.area_id,
+      lat: selectedPoint.lat,
+      lng: selectedPoint.lng,
+      radius: map.value.radius || 500,
+      sync_area: true,
       infrastructure: map.value.infrastructure || [],
-      owned_card_ids: [],
+    };
+    if (selectedCategoryKey.value !== "all") {
+      payload.selected_category = selectedCategoryKey.value;
+    }
+    const result = await simulateCards(payload);
+    console.log("[GraphDB recommendation check]", {
+      area_id: result.area_id,
+      area_sync_status: result.area_sync_status,
+      area_sync_store_count: result.area_sync_store_count,
+      area_sync_error: result.area_sync_error,
+      recommendation_source: result.recommendation_source,
+      graph_status: result.graph_status,
+      graph_candidate_count: result.graph_candidate_count,
+      graph_fallback_reason: result.graph_fallback_reason,
+      user_graph_status: result.user_graph_status,
+      user_graph_owned_card_count: result.user_graph_owned_card_count,
+      user_graph_error: result.user_graph_error,
+      candidate_count: result.candidate_count,
+      best_card: result.best_card?.name,
+      best_graph_rerank_score: result.best_card?.graph_rerank_score,
+      best_graph_top_category: result.best_card?.graph_top_category,
+      best_graph_matched_categories: result.best_card?.graph_matched_categories,
     });
     recommendationResult.value = {
       ...result,

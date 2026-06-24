@@ -78,6 +78,55 @@ class UserConsumptionProfile(models.Model):
         return f"{self.user_id}:{self.source}"
 
 
+class UserCardEvent(models.Model):
+    EVENT_TYPES = [
+        ("viewed", "viewed"),
+        ("clicked", "clicked"),
+        ("liked", "liked"),
+        ("dismissed", "dismissed"),
+        ("applied_for", "applied_for"),
+    ]
+    GRAPH_SYNC_STATUSES = [
+        ("pending", "pending"),
+        ("synced", "synced"),
+        ("failed", "failed"),
+        ("skipped", "skipped"),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="card_events",
+        on_delete=models.CASCADE,
+    )
+    card = models.ForeignKey(
+        CardProduct,
+        related_name="user_events",
+        on_delete=models.CASCADE,
+    )
+    area_id = models.CharField(max_length=255, blank=True)
+    event_type = models.CharField(max_length=20, choices=EVENT_TYPES)
+    metadata_json = models.JSONField(default=dict, blank=True)
+    is_demo = models.BooleanField(default=False)
+    graph_sync_status = models.CharField(
+        max_length=20,
+        choices=GRAPH_SYNC_STATUSES,
+        default="pending",
+    )
+    graph_sync_error = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["user", "event_type", "-created_at"]),
+            models.Index(fields=["card", "event_type", "-created_at"]),
+            models.Index(fields=["area_id", "event_type", "-created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.user_id}:{self.card_id}:{self.event_type}"
+
+
 class UserUploadedReport(models.Model):
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
