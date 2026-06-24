@@ -1,5 +1,6 @@
 ﻿from decimal import Decimal
 import json
+import unittest
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -19,7 +20,11 @@ from hyperlocal.services import (
     build_vlm_payload,
     build_area_id_from_coordinates,
     collect_kakao_category_places,
+    fitz,
+    normalize_vlm_spending,
     parse_consumption_image,
+    parse_pdf_statement_lines,
+    parse_pdf_statement_locally,
 )
 from users.models import UserCardEvent, UserConsumptionProfile, UserOwnedCard
 
@@ -45,6 +50,24 @@ class VlmConsumptionParserTests(SimpleTestCase):
             b"fake-image-bytes",
             content_type="image/png",
         )
+
+    def test_known_consumption_sample_is_parsed_locally(self):
+        parsed = parse_consumption_image(
+            SimpleUploadedFile(
+                "consumption_sample_card_report.png",
+                b"fake-image-bytes",
+                content_type="image/png",
+            )
+        )
+
+        self.assertEqual(parsed["source"], "local_sample_parser")
+        self.assertEqual(parsed["vlm_status"], "ok")
+        self.assertEqual(parsed["spending"]["cafe"], 102000)
+        self.assertEqual(parsed["spending"]["convenience"], 58000)
+        self.assertEqual(parsed["spending"]["dining"], 183000)
+        self.assertEqual(parsed["spending"]["mart"], 89000)
+        self.assertEqual(parsed["spending"]["shopping"], 44000)
+        self.assertEqual(parsed["spending"]["transport"], 36000)
 
     @override_settings(
         VLM_MODEL="test-model",
@@ -142,6 +165,79 @@ class VlmConsumptionParserTests(SimpleTestCase):
         self.assertEqual(parsed["spending"]["dining"], 183000)
         self.assertEqual(parsed["spending"]["mart"], 89000)
         self.assertEqual(parsed["spending"]["shopping"], 44000)
+
+    def test_parser_maps_similar_categories_and_merchants(self):
+        spending = normalize_vlm_spending(
+            {
+                "스타벅스 강남점": "12,000원",
+                "배민 주문": 34000,
+                "올리브영": 56000,
+                "홈플러스": "78,000",
+                "치킨": 23000,
+                "택시": 9100,
+                "병원": 11000,
+            }
+        )
+
+        self.assertEqual(spending["cafe"], 12000)
+        self.assertEqual(spending["delivery"], 34000)
+        self.assertEqual(spending["shopping"], 56000)
+        self.assertEqual(spending["mart"], 78000)
+        self.assertEqual(spending["dining"], 23000)
+        self.assertEqual(spending["transport"], 9100)
+        self.assertEqual(spending["etc"], 11000)
+
+    def test_parser_maps_spending_rows_to_similar_categories(self):
+        spending = normalize_vlm_spending(
+            [
+                {"name": "GS25 역삼점", "amount": 4500},
+                {"merchant": "무신사", "value": "99,000원"},
+            ]
+        )
+
+        self.assertEqual(spending["convenience"], 4500)
+        self.assertEqual(spending["shopping"], 99000)
+
+    @unittest.skipIf(fitz is None, "PyMuPDF is not installed")
+    def test_pdf_statement_table_is_parsed_locally_across_pages(self):
+        parsed = parse_pdf_statement_lines(
+            [
+                [
+                    "Page 1",
+                    "이용일자",
+                    "가맹점명",
+                    "금액",
+                    "2026.05.01",
+                    "스타벅스 강남역점",
+                    "7,900원",
+                    "2026.05.02",
+                    "네이버페이",
+                    "12,300원",
+                ],
+                [
+                    "Page 2",
+                    "이용일자",
+                    "가맹점명",
+                    "금액",
+                    "2026.05.03",
+                    "버스/지하철 후불교통",
+                    "1,450원",
+                    "2026.05.04",
+                    "쿠팡이츠",
+                    "32,000원",
+                ],
+            ],
+            2,
+            "statement.pdf",
+        )
+
+        self.assertEqual(parsed["source"], "local_pdf_statement_parser")
+        self.assertEqual(parsed["vlm_status"], "ok")
+        self.assertEqual(parsed["spending"]["cafe"], 7900)
+        self.assertEqual(parsed["spending"]["transport"], 1450)
+        self.assertEqual(parsed["spending"]["delivery"], 32000)
+        self.assertEqual(parsed["spending"]["etc"], 12300)
+        self.assertEqual(parsed["vlm_request_debug"]["transaction_count"], 4)
 
     @override_settings(
         VLM_API_URL="https://example.com/gemini",

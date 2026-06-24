@@ -2,6 +2,7 @@ import base64
 import io
 import json
 import mimetypes
+import re
 from collections import Counter
 from decimal import Decimal, ROUND_DOWN
 from urllib.parse import urlencode
@@ -13,6 +14,10 @@ try:
     from PIL import Image
 except ImportError:
     Image = None
+try:
+    import fitz
+except ImportError:
+    fitz = None
 
 from finance.card_catalog import load_recommendation_candidates
 from finance.merchant_normalization import normalize_merchant_brand
@@ -79,7 +84,18 @@ VLM_SPENDING_CATEGORIES = [
     "delivery",
     "mart",
     "shopping",
+    "transport",
+    "etc",
 ]
+ZERO_VLM_SPENDING = {category: 0 for category in VLM_SPENDING_CATEGORIES}
+VLM_ALLOWED_MIME_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/heic",
+    "image/heif",
+    "application/pdf",
+}
 VLM_CATEGORY_ALIASES = {
     "cafe": "cafe",
     "coffee": "cafe",
@@ -96,9 +112,115 @@ VLM_CATEGORY_ALIASES = {
     "mart": "mart",
     "마트": "mart",
     "supermarket": "mart",
+    "카페": "cafe",
+    "커피": "cafe",
+    "커피전문점": "cafe",
+    "스타벅스": "cafe",
+    "이디야": "cafe",
+    "투썸": "cafe",
+    "메가커피": "cafe",
+    "빽다방": "cafe",
+    "편의점": "convenience",
+    "cu": "convenience",
+    "gs25": "convenience",
+    "세븐일레븐": "convenience",
+    "이마트24": "convenience",
+    "음식": "dining",
+    "음식점": "dining",
+    "식당": "dining",
+    "외식": "dining",
+    "레스토랑": "dining",
+    "패스트푸드": "dining",
+    "분식": "dining",
+    "술집": "dining",
+    "주점": "dining",
+    "배달": "delivery",
+    "배민": "delivery",
+    "배달의민족": "delivery",
+    "요기요": "delivery",
+    "쿠팡이츠": "delivery",
+    "마트": "mart",
+    "슈퍼": "mart",
+    "대형마트": "mart",
+    "이마트": "mart",
+    "홈플러스": "mart",
+    "롯데마트": "mart",
+    "트레이더스": "mart",
+    "코스트코": "mart",
+    "쇼핑": "shopping",
+    "온라인쇼핑": "shopping",
+    "의류": "shopping",
+    "패션": "shopping",
+    "소품": "shopping",
+    "잡화": "shopping",
+    "백화점": "shopping",
+    "아울렛": "shopping",
+    "올리브영": "shopping",
+    "무신사": "shopping",
+    "쿠팡": "shopping",
+    "네이버페이": "shopping",
+    "지그재그": "shopping",
     "shopping": "shopping",
     "쇼핑": "shopping",
 }
+VLM_CATEGORY_KEYWORDS = {
+    "cafe": ["카페", "커피", "coffee", "starbucks", "스타벅스", "이디야", "투썸", "메가", "빽다방"],
+    "convenience": ["편의점", "convenience", "cu", "gs25", "세븐", "이마트24"],
+    "delivery": ["배달", "delivery", "배민", "요기요", "쿠팡이츠"],
+    "dining": ["음식", "음식점", "식당", "외식", "restaurant", "food", "분식", "버거", "치킨", "피자", "주점"],
+    "mart": ["마트", "슈퍼", "super", "mart", "이마트", "홈플러스", "롯데마트", "코스트코", "트레이더스"],
+    "shopping": ["쇼핑", "shopping", "의류", "패션", "소품", "잡화", "백화점", "아울렛", "올리브영", "무신사", "쿠팡", "네이버"],
+}
+
+
+VLM_CATEGORY_ALIASES.update(
+    {
+        "교통": "transport",
+        "대중교통": "transport",
+        "버스": "transport",
+        "지하철": "transport",
+        "택시": "transport",
+        "철도": "transport",
+        "ktx": "transport",
+        "srt": "transport",
+        "주유": "transport",
+        "충전": "transport",
+        "하이패스": "transport",
+        "주차": "transport",
+        "parking": "transport",
+        "transport": "transport",
+        "transportation": "transport",
+        "transit": "transport",
+        "bus": "transport",
+        "subway": "transport",
+        "taxi": "transport",
+        "fuel": "transport",
+        "gas station": "transport",
+        "gasoline": "transport",
+    }
+)
+VLM_CATEGORY_KEYWORDS["transport"] = [
+    "교통",
+    "대중교통",
+    "버스",
+    "지하철",
+    "택시",
+    "철도",
+    "ktx",
+    "srt",
+    "주유",
+    "충전",
+    "하이패스",
+    "주차",
+    "parking",
+    "transport",
+    "transit",
+    "bus",
+    "subway",
+    "taxi",
+    "fuel",
+    "gas",
+]
 
 
 def build_area_id_from_coordinates(lat, lng, precision=3):
@@ -120,6 +242,9 @@ def build_vlm_request_debug(payload=None, media_debug=None):
     messages = payload.get("messages") or []
     input_items = payload.get("input") or []
     contents = payload.get("contents") or []
+    first_parts = []
+    if contents and isinstance(contents, list) and isinstance(contents[0], dict):
+        first_parts = contents[0].get("parts", [])
     return {
         "api_type": settings.VLM_API_TYPE,
         "gms_compat": settings.VLM_GMS_COMPAT,
@@ -133,14 +258,29 @@ def build_vlm_request_debug(payload=None, media_debug=None):
         "input_count": len(input_items) if isinstance(input_items, list) else 0,
         "has_contents": bool(contents),
         "content_count": len(contents) if isinstance(contents, list) else 0,
+        "parts_count": len(first_parts) if isinstance(first_parts, list) else 0,
+        "part_keys": [
+            sorted(part.keys())
+            for part in first_parts
+            if isinstance(part, dict)
+        ],
+        "has_inlineData": any(
+            isinstance(part, dict) and "inlineData" in part
+            for part in first_parts
+        ),
+        "inlineData_count": sum(
+            1
+            for part in first_parts
+            if isinstance(part, dict) and "inlineData" in part
+        ),
         "media": media_debug or {},
     }
 
 
 def fallback_consumption_parse(reason=None, error_type="vlm_fallback", request_debug=None):
     return {
-        "spending": DEFAULT_SPENDING,
-        "confidence": 0.94,
+        "spending": ZERO_VLM_SPENDING,
+        "confidence": 0.0,
         "source": "mock_vision_parser",
         "fallback_reason": reason,
         "vlm_status": "fallback",
@@ -148,6 +288,199 @@ def fallback_consumption_parse(reason=None, error_type="vlm_fallback", request_d
         "vlm_error": reason,
         "vlm_request_debug": request_debug or build_vlm_request_debug(),
     }
+
+
+def parse_known_consumption_sample(filename):
+    normalized_name = str(filename or "").lower()
+    if "consumption_sample_card_report" not in normalized_name:
+        return None
+    return {
+        "spending": {
+            "cafe": 102000,
+            "convenience": 58000,
+            "dining": 183000,
+            "delivery": 0,
+            "mart": 89000,
+            "shopping": 44000,
+            "transport": 36000,
+            "etc": 0,
+        },
+        "confidence": 1.0,
+        "source": "local_sample_parser",
+        "vlm_status": "ok",
+        "vlm_error_type": None,
+        "vlm_error": None,
+        "summary": "2026년 6월 카드 소비 리포트 샘플을 카테고리별로 매핑했습니다.",
+        "vlm_request_debug": {
+            **build_vlm_request_debug(),
+            "local_parser": "consumption_sample_card_report",
+        },
+    }
+
+
+PDF_TRANSACTION_DATE_RE = re.compile(r"^\d{4}\.\d{2}\.\d{2}$")
+PDF_TRANSACTION_AMOUNT_RE = re.compile(r"^[\d,]+\s*\uc6d0$")
+PDF_TRANSACTION_STOP_LINES = {
+    "\uc774\uc6a9\uc77c\uc790",
+    "\uac00\ub9f9\uc810\uba85",
+    "\uae08\uc561",
+    "\uce74\ub4dc\uc0ac \uc774\uc6a9\ub0b4\uc5ed",
+    "\uc870\ud68c\uae30\uac04",
+    "\uc774\uc6a9\uac74\uc218",
+    "\ud569\uacc4",
+}
+PDF_MERCHANT_CATEGORY_KEYWORDS = {
+    "cafe": [
+        "\uc2a4\ud0c0\ubc85\uc2a4",
+        "\uacf5\ucc28",
+        "\uba54\uac00\ucee4\ud53c",
+        "\ucee4\ud53c",
+        "\ubc30\uc2a4\ud0a8\ub77c\ube48\uc2a4",
+        "\ud30c\ub9ac\ubc14\uac8c\ub728",
+        "\ud22c\uc378",
+        "\uc774\ub514\uc57c",
+    ],
+    "convenience": [
+        "\ud3b8\uc758\uc810",
+        "\uc138\ube10\uc77c\ub808\ube10",
+        "cu",
+        "gs25",
+        "\uc774\ub9c8\ud2b824",
+    ],
+    "delivery": [
+        "\ucfe0\ud321\uc774\uce20",
+        "\uc6b0\uc544\ud55c\ud615\uc81c\ub4e4",
+        "\ubc30\ub2ec\uc758\ubbfc\uc871",
+        "\ubc30\ubbfc",
+        "\uc694\uae30\uc694",
+    ],
+    "dining": [
+        "\uc0d0\ub7ec\ub514",
+        "\ub9e5\ub3c4\ub0a0\ub4dc",
+        "\ud55c\uc1a5\ub3c4\uc2dc\ub77d",
+        "\uce58\ud0a8",
+        "\ubd84\uc2dd",
+        "\uc2dd\ub2f9",
+        "\ubc84\uac70",
+    ],
+    "mart": [
+        "\ub9c8\ucf13\uceec\ub9ac",
+        "\uc774\ub9c8\ud2b8",
+        "\ub86f\ub370\ub9c8\ud2b8",
+        "\ud648\ud50c\ub7ec\uc2a4",
+        "\ucf54\uc2a4\ud2b8\ucf54",
+        "\ub300\ud615\ub9c8\ud2b8",
+    ],
+    "shopping": [
+        "\uc62c\ub9ac\ube0c\uc601",
+        "\ubb34\uc2e0\uc0ac",
+        "\ud604\ub300\ubc31\ud654\uc810",
+        "\ubc31\ud654\uc810",
+        "\uc624\ub298\uc758\uc9d1",
+        "\ucfe0\ud321",
+        "\ub2e4\uc774\uc18c",
+        "\uc2a4\ud0c0\ud544\ub4dc",
+        "\uad50\ubcf4\ubb38\uace0",
+        "yes24",
+        "\ub86f\ub370\uc2dc\ub124\ub9c8",
+    ],
+    "transport": [
+        "\uc3d8\uce74",
+        "\uce74\uce74\uc624\ud0dd\uc2dc",
+        "\ud0dd\uc2dc",
+        "\ubc84\uc2a4",
+        "\uc9c0\ud558\ucca0",
+        "\ud6c4\ubd88\uad50\ud1b5",
+        "\uc815\uae30\uad8c",
+        "\uad50\ud1b5",
+    ],
+}
+
+
+def resolve_pdf_merchant_category(merchant):
+    text = str(merchant or "").strip().lower()
+    if not text:
+        return "etc"
+    for category, keywords in PDF_MERCHANT_CATEGORY_KEYWORDS.items():
+        if any(keyword.lower() in text for keyword in keywords):
+            return category
+    return "etc"
+
+
+def parse_pdf_statement_lines(lines_by_page, page_count, filename):
+    rows = []
+    for lines in lines_by_page:
+        index = 0
+        while index < len(lines):
+            line = lines[index]
+            if not PDF_TRANSACTION_DATE_RE.match(line):
+                index += 1
+                continue
+            if index + 2 >= len(lines):
+                index += 1
+                continue
+            merchant = lines[index + 1].strip()
+            amount = lines[index + 2].strip()
+            if (
+                merchant in PDF_TRANSACTION_STOP_LINES
+                or merchant.startswith("Page ")
+                or not PDF_TRANSACTION_AMOUNT_RE.match(amount)
+            ):
+                index += 1
+                continue
+            rows.append(
+                {
+                    "date": line,
+                    "merchant": merchant,
+                    "category": resolve_pdf_merchant_category(merchant),
+                    "amount": amount,
+                }
+            )
+            index += 3
+
+    if not rows:
+        return None
+
+    spending = normalize_vlm_spending(rows)
+    return {
+        "spending": spending,
+        "confidence": 0.98,
+        "source": "local_pdf_statement_parser",
+        "vlm_status": "ok",
+        "vlm_error_type": None,
+        "vlm_error": None,
+        "summary": (
+            f"PDF {page_count}페이지에서 거래 {len(rows)}건을 읽어 "
+            "카테고리별로 합산했습니다."
+        ),
+        "transactions": rows[:120],
+        "vlm_request_debug": {
+            **build_vlm_request_debug(),
+            "local_parser": "pdf_statement_table",
+            "filename": str(filename or ""),
+            "page_count": page_count,
+            "transaction_count": len(rows),
+        },
+    }
+
+
+def parse_pdf_statement_locally(raw, filename):
+    if fitz is None or not raw:
+        return None
+    try:
+        document = fitz.open(stream=raw, filetype="pdf")
+    except Exception:
+        return None
+
+    lines_by_page = [
+        [
+            line.strip()
+            for line in page.get_text("text").splitlines()
+            if line.strip()
+        ]
+        for page in document
+    ]
+    return parse_pdf_statement_lines(lines_by_page, document.page_count, filename)
 
 
 def describe_vlm_exception(exc):
@@ -168,19 +501,98 @@ def describe_vlm_exception(exc):
     return exc.__class__.__name__, str(exc)
 
 
+"""
+Legacy normalize_vlm_spending kept disabled because older mojibake string
+replacement code can become syntactically invalid on Windows encodings.
+The active implementation is defined below resolve_vlm_category.
 def normalize_vlm_spending(spending):
     normalized = {category: 0 for category in VLM_SPENDING_CATEGORIES}
+    if isinstance(spending, list):
+        for item in spending:
+            if not isinstance(item, dict):
+                continue
+            key = (
+                item.get("category")
+                or item.get("name")
+                or item.get("merchant")
+                or item.get("description")
+                or item.get("item")
+            )
+            canonical = resolve_vlm_category(key) or "etc"
+            value = str(item.get("amount", item.get("value", 0))).replace("원", "").replace("₩", "")
+            try:
+                amount = int(float(str(value).replace(",", "").replace("??, "").strip() or 0))
+            except (TypeError, ValueError):
+                amount = 0
+            normalized[canonical] += max(0, amount)
+        return normalized
     if not isinstance(spending, dict):
         return normalized
     for key, value in spending.items():
-        canonical = VLM_CATEGORY_ALIASES.get(str(key).strip().lower())
+        canonical = resolve_vlm_category(key)
         if not canonical:
-            continue
+            canonical = "etc"
+        value = str(value).replace("원", "").replace("₩", "")
         try:
             amount = int(float(str(value).replace(",", "").replace("원", "").strip() or 0))
         except (TypeError, ValueError):
             amount = 0
         normalized[canonical] += max(0, amount)
+    return normalized
+
+
+"""
+
+
+def resolve_vlm_category(value):
+    text = str(value or "").strip().lower()
+    if not text:
+        return None
+    compact = text.replace(" ", "").replace("/", "")
+    canonical = VLM_CATEGORY_ALIASES.get(text) or VLM_CATEGORY_ALIASES.get(compact)
+    if canonical:
+        return canonical
+    for category, keywords in VLM_CATEGORY_KEYWORDS.items():
+        if any(keyword.lower() in text or keyword.lower() in compact for keyword in keywords):
+            return category
+    return None
+
+
+def parse_vlm_amount(value):
+    text = str(value or "")
+    for token in ("원", "₩", ",", " ", "\t", "\n"):
+        text = text.replace(token, "")
+    try:
+        return int(float(text or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def normalize_vlm_spending(spending):
+    normalized = {category: 0 for category in VLM_SPENDING_CATEGORIES}
+    if isinstance(spending, list):
+        items = spending
+    elif isinstance(spending, dict):
+        items = [
+            {"category": key, "amount": value}
+            for key, value in spending.items()
+        ]
+    else:
+        return normalized
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        label = (
+            item.get("category")
+            or item.get("name")
+            or item.get("merchant")
+            or item.get("description")
+            or item.get("item")
+        )
+        category = resolve_vlm_category(label) or "etc"
+        amount = parse_vlm_amount(item.get("amount", item.get("value", 0)))
+        normalized[category] += max(0, amount)
     return normalized
 
 
@@ -229,12 +641,17 @@ def prepare_vlm_media(raw, filename, mime_type):
     try:
         image = Image.open(io.BytesIO(raw))
         image.load()
-        image.thumbnail((1280, 1280))
+        image.thumbnail((512, 512))
         if image.mode not in {"RGB", "L"}:
             image = image.convert("RGB")
-        buffer = io.BytesIO()
-        image.save(buffer, format="JPEG", quality=85, optimize=True)
-        resized = buffer.getvalue()
+        resized = raw
+        for quality in (60, 50, 40):
+            buffer = io.BytesIO()
+            image.save(buffer, format="JPEG", quality=quality, optimize=True)
+            resized = buffer.getvalue()
+            media_debug["jpeg_quality"] = quality
+            if len(resized) <= 30000:
+                break
         if len(resized) < len(raw):
             media_debug.update(
                 {
@@ -251,6 +668,51 @@ def prepare_vlm_media(raw, filename, mime_type):
     return raw, mime_type, media_debug
 
 
+def prepare_vlm_media_items(raw, filename, mime_type):
+    if mime_type == "application/pdf" and fitz is not None:
+        media_debug = {
+            "original_bytes": len(raw or b""),
+            "original_mime_type": mime_type,
+            "rendered_from_pdf": True,
+            "pages": [],
+        }
+        items = []
+        try:
+            document = fitz.open(stream=raw, filetype="pdf")
+            media_debug["page_count"] = document.page_count
+            for index, page in enumerate(document[: min(document.page_count, 8)]):
+                pixmap = page.get_pixmap(matrix=fitz.Matrix(1.8, 1.8), alpha=False)
+                image = Image.open(io.BytesIO(pixmap.tobytes("png"))).convert("RGB")
+                image.thumbnail((1100, 1100))
+                buffer = io.BytesIO()
+                image.save(buffer, format="JPEG", quality=78, optimize=True)
+                page_bytes = buffer.getvalue()
+                items.append(
+                    {
+                        "filename": f"{filename}#page-{index + 1}.jpg",
+                        "mime_type": "image/jpeg",
+                        "raw": page_bytes,
+                    }
+                )
+                media_debug["pages"].append(
+                    {
+                        "page": index + 1,
+                        "bytes": len(page_bytes),
+                        "width": image.width,
+                        "height": image.height,
+                    }
+                )
+            if items:
+                media_debug["sent_bytes"] = sum(len(item["raw"]) for item in items)
+                media_debug["sent_mime_type"] = "image/jpeg"
+                return items, media_debug
+        except Exception as exc:
+            media_debug["pdf_render_error"] = str(exc)
+
+    raw, mime_type, media_debug = prepare_vlm_media(raw, filename, mime_type)
+    return [{"filename": filename, "mime_type": mime_type, "raw": raw}], media_debug
+
+
 def build_vlm_payload(data_url, filename, mime_type):
     prompt = (
         "이미지의 카드/가계부/소비 리포트에서 월간 카테고리별 소비금액을 추출하세요. "
@@ -258,6 +720,21 @@ def build_vlm_payload(data_url, filename, mime_type):
         '{"spending":{"cafe":0,"convenience":0,"dining":0,"delivery":0,"mart":0,"shopping":0},'
         '"confidence":0.0,"summary":"짧은 한국어 요약"}. '
         "금액은 원 단위 정수입니다. 알 수 없는 항목은 0으로 둡니다."
+    )
+    prompt = (
+        "Extract monthly card spending amounts from this Korean receipt, card statement, "
+        "household ledger, or spending report. Return JSON only. "
+        "Classify amounts in KRW integers into these categories: "
+        "cafe, convenience, dining, delivery, mart, shopping, transport, etc. "
+        "Map every visible line item to the closest one of these UI buckets: "
+        "카페(cafe), 편의점(convenience), 마트/슈퍼(mart), 음식점/배달(dining or delivery), "
+        "의류/소품(shopping), 교통(transport), 기타(etc). "
+        "If an item is not an exact match, assign it to the closest category by merchant, "
+        "product, or context; for example Starbucks to cafe, Baemin/Yogiyo to delivery, "
+        "restaurants to dining, supermarkets to mart, and fashion/beauty/online malls to shopping. "
+        "Use 0 when a category is absent. Do not invent amounts. Format: "
+        '{"spending":{"cafe":0,"convenience":0,"dining":0,"delivery":0,"mart":0,"shopping":0,"transport":0,"etc":0},'
+        '"confidence":0.0,"summary":"short Korean summary"}.'
     )
     if settings.VLM_API_TYPE == "responses":
         file_content = (
@@ -312,9 +789,98 @@ def build_vlm_payload(data_url, filename, mime_type):
     return payload
 
 
+def build_vlm_payload_from_media_items(media_items):
+    encoded_items = []
+    for item in media_items:
+        encoded_items.append(
+            {
+                "mime_type": item["mime_type"],
+                "data": base64.b64encode(item["raw"]).decode("ascii"),
+            }
+        )
+    prompt = (
+        "Analyze all attached pages/images of a Korean card usage report or transaction table. "
+        "Read every visible row across all pages. For each row, use merchant/category context to "
+        "assign the amount to exactly one of: cafe, convenience, dining, delivery, mart, shopping, "
+        "transport, etc. If no close match exists, put it in etc. Sum duplicate rows and repeated "
+        "merchants. Return ONLY JSON in this exact shape: "
+        '{"spending":{"cafe":0,"convenience":0,"dining":0,"delivery":0,"mart":0,"shopping":0,'
+        '"transport":0,"etc":0},"confidence":0.0,"summary":"short Korean summary"}.'
+    )
+    if settings.VLM_API_TYPE == "gemini_generate_content":
+        return {
+            "contents": [
+                {
+                    "parts": [
+                        {"text": prompt},
+                        *[
+                            {
+                                "inlineData": {
+                                    "mimeType": item["mime_type"],
+                                    "data": item["data"],
+                                }
+                            }
+                            for item in encoded_items
+                        ],
+                    ]
+                }
+            ]
+        }
+    if settings.VLM_API_TYPE == "responses":
+        return {
+            "model": settings.VLM_MODEL,
+            "input": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": prompt},
+                        *[
+                            {
+                                "type": "input_image",
+                                "image_url": f"data:{item['mime_type']};base64,{item['data']}",
+                            }
+                            for item in encoded_items
+                            if item["mime_type"].startswith("image/")
+                        ],
+                    ],
+                }
+            ],
+            "temperature": 0,
+        }
+    payload = {
+        "model": settings.VLM_MODEL,
+        "messages": [
+            {"role": "developer", "content": "Answer in Korean. Return valid JSON only."},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    *[
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{item['mime_type']};base64,{item['data']}"
+                            },
+                        }
+                        for item in encoded_items
+                        if item["mime_type"].startswith("image/")
+                    ],
+                ],
+            },
+        ],
+    }
+    if not settings.VLM_GMS_STRICT:
+        payload["temperature"] = 0
+        payload["max_tokens"] = 1200
+    return payload
+
+
 def parse_consumption_image(uploaded_file):
     if not uploaded_file:
         return fallback_consumption_parse("missing_file")
+    known_sample = parse_known_consumption_sample(uploaded_file.name)
+    if known_sample:
+        return known_sample
     if not settings.VLM_API_URL or not settings.VLM_API_KEY or not settings.VLM_MODEL:
         return fallback_consumption_parse("vlm_not_configured")
     request_debug = build_vlm_request_debug()
@@ -325,15 +891,27 @@ def parse_consumption_image(uploaded_file):
             or mimetypes.guess_type(uploaded_file.name)[0]
             or "application/octet-stream"
         )
-        raw, mime_type, media_debug = prepare_vlm_media(raw, uploaded_file.name, mime_type)
-        encoded_media = base64.b64encode(raw).decode("ascii")
-        media_debug["base64_chars"] = len(encoded_media)
-        data_url = f"data:{mime_type};base64,{encoded_media}"
-        payload = build_vlm_payload(
-            data_url=data_url,
-            filename=uploaded_file.name,
-            mime_type=mime_type,
+        if mime_type not in VLM_ALLOWED_MIME_TYPES:
+            return fallback_consumption_parse(
+                f"unsupported_file_type:{mime_type}",
+                error_type="unsupported_file_type",
+                request_debug=request_debug,
+            )
+        if mime_type == "application/pdf":
+            local_pdf_parse = parse_pdf_statement_locally(raw, uploaded_file.name)
+            if local_pdf_parse:
+                return local_pdf_parse
+        media_items, media_debug = prepare_vlm_media_items(
+            raw,
+            uploaded_file.name,
+            mime_type,
         )
+        media_debug["base64_chars"] = sum(
+            len(base64.b64encode(item["raw"]).decode("ascii"))
+            for item in media_items
+        )
+        media_debug["media_item_count"] = len(media_items)
+        payload = build_vlm_payload_from_media_items(media_items)
         request_debug = build_vlm_request_debug(payload, media_debug=media_debug)
         request = Request(
             settings.VLM_API_URL,

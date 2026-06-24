@@ -3,11 +3,15 @@ import * as echarts from "echarts";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { api } from "./api";
 
+const BACKEND_ORIGIN = import.meta.env.VITE_BACKEND_ORIGIN || "http://127.0.0.1:8001";
 const reportFilters = [];
 const selectedReportFilter = ref("");
+const introSpend = ref("cafe");
+const introArea = ref("gangnam");
+const introRadius = ref("500");
 
 const pages = [
-  { id: "home", label: "대시보드" },
+  { id: "home", label: "홈" },
   { id: "map", label: "슬세권 분석" },
   { id: "cards", label: "카드 대시보드" },
   { id: "videos", label: "유튜브 검색" },
@@ -16,13 +20,13 @@ const pages = [
 ];
 
 const spendRows = ref([
-  { name: "카페", amount: 120000, ratio: 25 },
-  { name: "편의점", amount: 80000, ratio: 15 },
-  { name: "마트/슈퍼", amount: 150000, ratio: 20 },
-  { name: "음식점/배달", amount: 200000, ratio: 20 },
-  { name: "의류/소품", amount: 130000, ratio: 10 },
-  { name: "교통", amount: 100000, ratio: 10 },
-  { name: "기타", amount: 20000, ratio: 10 },
+  { name: "카페", amount: 0, ratio: 0 },
+  { name: "편의점", amount: 0, ratio: 0 },
+  { name: "마트/슈퍼", amount: 0, ratio: 0 },
+  { name: "음식점/배달", amount: 0, ratio: 0 },
+  { name: "의류/소품", amount: 0, ratio: 0 },
+  { name: "교통", amount: 0, ratio: 0 },
+  { name: "기타", amount: 0, ratio: 0 },
 ]);
 
 const userProfile = ref({
@@ -34,7 +38,8 @@ const userProfile = ref({
 const mapCategories = ["전체", "편의점", "카페", "마트", "음식점/배달"];
 const reportCategoryOptions = ["전체", "편의점", "카페", "마트", "음식점/배달"];
 const cardFilters = ["전체", "카페", "편의점", "의류", "배달", "마트", "교통", "기타"];
-const communityTabs = ["자유게시판", "질문&답변", "동네 정보", "이벤트"];
+const communityTabs = ["전체", "자유게시판", "질문&답변", "동네 정보", "이벤트"];
+const communityPostTabs = communityTabs.filter((tab) => tab !== "전체");
 const videoFallback = {
   source: "example",
   categories: ["전체", "카드 추천", "혜택 비교", "사용 후기", "비교 분석"],
@@ -152,9 +157,10 @@ const selectedCategory = ref("전체");
 const selectedReportCategory = ref("전체");
 const showReportPopularCards = ref(false);
 const selectedCardFilter = ref("전체");
-const selectedCommunityTab = ref("자유게시판");
+const selectedCommunityTab = ref("전체");
 const communityPage = ref(1);
 const communityPageSize = 10;
+const communitySearchQuery = ref("");
 const selectedCommunityPostId = ref(null);
 const editingCommunityPost = ref(false);
 const editPost = ref({ title: "", content: "", budget: "", tab: "자유게시판" });
@@ -171,6 +177,7 @@ const drawerCard = ref(null);
 const favoriteCards = ref([]);
 const FAVORITE_STORAGE_PREFIX = "seulpick.favoriteCards";
 const selectedPoint = ref({ lat: 37.5007, lng: 127.0365 });
+const mapSelectionMode = ref("map");
 const addressSearchQuery = ref("강남구 역삼동");
 const nearbyPlaceCount = ref(0);
 const currentAreaId = ref("");
@@ -193,6 +200,11 @@ const loginMode = ref("login");
 const authForm = ref({ username: "seulpick", name: "김슬픽", email: "seulpick@example.com", password: "seulpick123" });
 const profileEditing = ref(false);
 const profileForm = ref({ name: "", email: "", password: "" });
+const ownedCardPickerOpen = ref(false);
+const ownedCardSearch = ref("");
+const ownedCardCatalog = ref([]);
+const ownedCardCatalogLoading = ref(false);
+const manualOwnedCardName = ref("");
 const newPost = ref({ title: "", content: "", budget: "200,000원", tab: "자유게시판" });
 const commentDrafts = ref({});
 let kakaoMap;
@@ -207,11 +219,36 @@ const isAuthenticated = computed(() => Boolean(authUser.value));
 const currentUserId = computed(() => authUser.value?.id || null);
 const ownedCardSet = computed(() => new Set(userProfile.value.ownedCards || []));
 const liveBoost = computed(() => Math.max(0, Math.round((Number(radius.value) - 500) / 80)) + mapRecalcTick.value);
+const hasRecommendationReport = computed(() => Boolean(currentAreaId.value));
+
+function compactCardName(value) {
+  return String(value || "")
+    .replace(/\s+/g, "")
+    .replace(/카드$/g, "")
+    .toLowerCase();
+}
+
+function catalogImageForCard(card) {
+  const currentImage = resolveImageUrl(card?.image_url || card?.raw?.image_url || "");
+  if (currentImage) return currentImage;
+
+  const target = compactCardName(card?.name);
+  if (!target) return "";
+
+  const matched = ownedCardCatalog.value.find((catalogCard) => {
+    const candidate = compactCardName(catalogCard.name);
+    return candidate && (candidate === target || candidate.includes(target) || target.includes(candidate));
+  });
+
+  return resolveImageUrl(matched?.image_url || matched?.raw?.image_url || "");
+}
+
 const liveCards = computed(() =>
   recommendationCards.value.map((card) => {
     const hoverBoost = hoveredCardId.value === card.id ? 3 : 0;
     return {
       ...card,
+      image_url: catalogImageForCard(card),
       liveScore: Math.min(99, card.score + liveBoost.value + hoverBoost),
       liveSaving: card.saving + liveBoost.value * 450 + hoverBoost * 600,
     };
@@ -257,6 +294,39 @@ const reportGroups = computed(() => [
     accent: "green",
   },
 ]);
+const introSpendTypes = [
+  { id: "cafe", label: "카페형", focus: "카페/외식", boost: 7, benefit: 31800, card: "KB국민 My WE:SH 카드" },
+  { id: "dining", label: "외식형", focus: "음식점/배달", boost: 5, benefit: 29200, card: "신한카드 Simple Plan+" },
+  { id: "mart", label: "마트형", focus: "마트/생활", boost: 4, benefit: 27600, card: "삼성 iD SIMPLE" },
+  { id: "balanced", label: "균형형", focus: "생활 전반", boost: 2, benefit: 24400, card: "트래블월렛 우리카드" },
+];
+const introAreaTypes = [
+  { id: "gangnam", label: "강남역", category: "카페·외식", candidates: 71, boost: 6 },
+  { id: "jamsil", label: "잠실", category: "마트·외식", candidates: 58, boost: 4 },
+  { id: "hongdae", label: "홍대", category: "카페·편의점", candidates: 64, boost: 5 },
+];
+const introRadiusOptions = [
+  { id: "300", value: 300, label: "300m", boost: -2, stores: 34 },
+  { id: "500", value: 500, label: "500m", boost: 0, stores: 62 },
+  { id: "800", value: 800, label: "800m", boost: 3, stores: 104 },
+];
+const introResult = computed(() => {
+  const spend = introSpendTypes.find((item) => item.id === introSpend.value) || introSpendTypes[0];
+  const area = introAreaTypes.find((item) => item.id === introArea.value) || introAreaTypes[0];
+  const radiusOption = introRadiusOptions.find((item) => item.id === introRadius.value) || introRadiusOptions[1];
+  const score = Math.min(96, Math.max(61, 68 + spend.boost + area.boost + radiusOption.boost));
+  const graphCandidates = area.candidates + Math.round(radiusOption.stores * 0.32);
+  const estimatedBenefit = spend.benefit + area.boost * 850 + radiusOption.boost * 600;
+  return {
+    spend,
+    area,
+    radius: radiusOption,
+    score,
+    graphCandidates,
+    estimatedBenefit,
+    reason: `${area.label} 주변 ${area.category} 상권과 ${spend.focus} 소비가 겹쳐 혜택 적합도가 높게 계산됩니다.`,
+  };
+});
 const rankedDashboardCards = computed(() =>
   dashboardCards
     .map((card) => ({ ...card, liveScore: Number((card.score + liveBoost.value * 0.4 + (hoveredCardId.value === card.name ? 1.8 : 0)).toFixed(1)) }))
@@ -288,7 +358,25 @@ const behaviorHashtags = computed(() => {
   if (tags.length === 1) tags.push("#카페", "#외식");
   return tags;
 });
-const behaviorRecommendedCard = computed(() => liveCards.value[0] || null);
+const behaviorRecommendedCard = computed(() => {
+  const recommended = liveCards.value[0] || null;
+  if (recommended?.image_url) return recommended;
+
+  const matchedCatalogCard = recommended ? ownedCardCatalog.value.find((card) => card.name === recommended.name) : null;
+  if (recommended && matchedCatalogCard?.image_url) {
+    return {
+      ...recommended,
+      image_url: matchedCatalogCard.image_url,
+      application_url: recommended.application_url || matchedCatalogCard.application_url,
+      raw: recommended.raw || matchedCatalogCard.raw,
+    };
+  }
+
+  if (ownedCardCatalog.value[0]) {
+    return toRankingDashboardCard(ownedCardCatalog.value[0], 0);
+  }
+  return recommended;
+});
 const similarUserInsight = computed(() => {
   const card = behaviorRecommendedCard.value;
   const baseSaving = Number(card?.liveSaving || card?.saving || 0);
@@ -351,38 +439,69 @@ const favoriteCardsForProfile = computed(() => favoriteCards.value);
 const drawerDetailInfo = computed(() => {
   const card = drawerCard.value || {};
   const raw = card.raw || {};
+  const preset = dashboardCards.find((item) => item.name === card.name) || {};
   const rawBenefits = raw.benefits || raw.detail_benefits || raw.detailBenefits || raw.benefit_summary || raw.summary_benefits;
   const detailBenefits = [
+    ...normalizeTextList(preset.detailBenefits),
     ...normalizeTextList(card.detailBenefits),
-    ...normalizeTextList(card.benefits),
-    ...normalizeTextList(rawBenefits),
+    ...normalizeBenefitList(card.benefits),
+    ...normalizeBenefitList(rawBenefits),
   ];
   const perkBenefits = normalizePerkList(card.perks);
   const annualFee =
-    card.fees ||
-    card.annual_fee ||
-    card.annualFee ||
-    raw.fees ||
-    raw.annual_fee ||
-    raw.annualFee ||
-    raw.domestic_annual_fee ||
-    "연회비 정보 확인 필요";
+    formatAnnualFee(raw.annual_fee || raw.annualFee || raw.domestic_annual_fee || raw.fees) ||
+    formatAnnualFee(card.annual_fee || card.annualFee || card.fees) ||
+    formatAnnualFee(preset.fees) ||
+    "연회비 없음";
   const condition =
-    card.condition ||
-    card.previous_month_spending ||
-    card.required_spend ||
-    raw.condition ||
-    raw.previous_month_spending ||
-    raw.required_spend ||
-    raw.minimum_spend ||
-    "전월실적 조건 확인 필요";
+    formatSpendCondition(
+        raw.previous_month_spending ||
+        raw.previous_month_requirement ||
+        raw.required_spend ||
+        raw.minimum_spend ||
+        raw.benefit_tiers?.[0]?.minimum_spend ||
+        raw.benefit_tiers?.[0]?.min_previous_month_spend ||
+        card.previous_month_spending ||
+        card.previous_month_requirement ||
+        card.required_spend ||
+        raw.condition ||
+        card.condition
+    ) ||
+    formatSpendCondition(preset.condition) ||
+    "전월실적 없음";
   return {
     annualFee,
     condition,
-    benefits: detailBenefits.length ? detailBenefits : perkBenefits,
+    benefits: uniqueList(detailBenefits.length ? detailBenefits : perkBenefits).slice(0, 8),
     perks: perkBenefits,
   };
 });
+function formatMoneyValue(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "";
+  return `${currency(number)}원`;
+}
+function formatAnnualFee(value) {
+  if (value === 0) return "연회비 없음";
+  if (typeof value === "number") return formatMoneyValue(value);
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (/^\d+$/.test(text.replace(/,/g, ""))) return formatMoneyValue(text.replace(/,/g, ""));
+  if (text.includes("원") || text.includes("연회비") || text.includes("없음")) return text;
+  return "";
+}
+function formatSpendCondition(value) {
+  if (value === 0) return "전월실적 없음";
+  if (typeof value === "number") return `전월실적 ${formatMoneyValue(value)} 이상`;
+  const text = String(value || "").trim();
+  if (!text || /^[a-z_]+(\s*[·,]\s*[a-z_]+)*$/i.test(text)) return "";
+  if (/^\d+$/.test(text.replace(/,/g, ""))) return `전월실적 ${formatMoneyValue(text.replace(/,/g, ""))} 이상`;
+  if (text.includes("전월") || text.includes("실적") || text.includes("이상") || text.includes("없음")) return text;
+  return "";
+}
+function uniqueList(items) {
+  return [...new Set(items.map((item) => String(item || "").trim()).filter(Boolean))];
+}
 function normalizeTextList(value) {
   if (!value) return [];
   if (Array.isArray(value)) {
@@ -391,14 +510,47 @@ function normalizeTextList(value) {
       .filter(Boolean);
   }
   if (typeof value === "object") {
-    return Object.entries(value)
-      .map(([key, item]) => [key, item].filter(Boolean).join(": "))
-      .filter(Boolean);
+    return normalizeBenefitList(value);
   }
   return String(value)
     .split(/\n|·|\|/)
     .map((item) => item.trim())
     .filter(Boolean);
+}
+function normalizeBenefitList(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.flatMap((item) => normalizeBenefitList(item)).filter(Boolean);
+  if (typeof value !== "object") return normalizeTextList(value);
+  const categoryLabels = {
+    cafe: "카페",
+    convenience: "편의점",
+    dining: "음식점",
+    delivery: "배달",
+    mart: "마트",
+    shopping: "쇼핑",
+    transport: "교통",
+    medical: "병원",
+    education: "교육",
+    movie: "영화",
+    travel: "여행",
+    etc: "기타",
+  };
+  const category = categoryLabels[value.category] || value.category_label || value.category || "혜택";
+  const rawText = String(value.raw_text || value.summary || value.description || "").trim();
+  const discount =
+    value.discount_type === "rate" && value.discount_rate != null
+      ? `${Math.round(Number(value.discount_rate) * 100)}% 할인`
+      : value.discount_type === "amount" && value.discount_amount != null
+        ? `${formatMoneyValue(value.discount_amount)} 할인`
+        : "";
+  const moneyLimit = value.category_monthly_limit || value.per_transaction_limit || value.daily_benefit_limit;
+  const usageLimit = value.monthly_usage_limit || value.daily_usage_limit;
+  const limitText = moneyLimit ? `, 한도 ${formatMoneyValue(moneyLimit)}` : usageLimit ? `, 이용 ${usageLimit}회` : "";
+  const scope = Array.isArray(value.merchant_scope) && value.merchant_scope.length ? ` (${value.merchant_scope.slice(0, 3).join(", ")})` : "";
+  const base = [category, discount].filter(Boolean).join(" ");
+  if (base.trim()) return [`${base}${scope}${limitText}`];
+  if (rawText) return [rawText.split(/\n| - |※/)[0].trim()].filter(Boolean);
+  return [];
 }
 function normalizePerkList(value) {
   if (!Array.isArray(value)) return [];
@@ -460,12 +612,14 @@ const toRankingDashboardCard = (card, index) => ({
     }),
   fees: card.issuer || "추천 카드",
   condition: card.specialty || "현재 지역/소비 패턴 기준",
+  image_url: resolveImageUrl(card.image_url || card.raw?.image_url || ""),
   saving: card.saving || 0,
 });
 const recommendationDashboardCards = computed(() => {
   if (!currentAreaId.value) return [];
   return recommendationCards.value.map(toRankingDashboardCard);
 });
+const databaseDashboardCards = computed(() => ownedCardCatalog.value.map((card, index) => toRankingDashboardCard(card, index)));
 const filteredGorillaCards = computed(() => {
   const type = selectedCardFilter.value;
   if (recommendationDashboardCards.value.length) {
@@ -477,22 +631,71 @@ const filteredGorillaCards = computed(() => {
     const check = ranked.filter((card) => card.type === "체크카드").slice(0, 8);
     return [...credit, ...check];
   }
+  if (databaseDashboardCards.value.length) {
+    const ranked = [...databaseDashboardCards.value].sort((a, b) => (b.score || 0) - (a.score || 0));
+    if (type === "신용카드" || type === "체크카드") {
+      return ranked.filter((card) => card.type === type).slice(0, 16);
+    }
+    return ranked.slice(0, 16);
+  }
   if (type === "신용카드" || type === "체크카드") {
     return gorillaCards.filter((card) => card.type === type);
   }
   return gorillaCards;
 });
 const ownedCardsForProfile = computed(() =>
-  (userProfile.value.ownedCards || []).map((name) => {
-    const matched = [...liveCards.value, ...dashboardCards, ...topCards].find((card) => card.name === name);
+  (userProfile.value.ownedCardDetails?.length ? userProfile.value.ownedCardDetails : userProfile.value.ownedCards || []).map((item) => {
+    const name = typeof item === "string" ? item : item.name;
+    if (item && typeof item === "object") {
+      return {
+        id: item.id,
+        name: item.name,
+        issuer: item.issuer || "등록 카드",
+        type: normalizeCardType(item.card_type || item.type),
+        image_url: resolveImageUrl(item.image_url || ""),
+        application_url: item.source_url,
+        score: 0,
+        saving: 0,
+        benefits: "보유 카드",
+        raw: item,
+      };
+    }
+    const matched = [...liveCards.value, ...dashboardCards, ...topCards, ...ownedCardCatalog.value].find((card) => card.name === name);
     return matched || { name, issuer: "등록 카드", type: "보유", score: 0, saving: 0, benefits: "사용자 등록 카드" };
   })
 );
 const activeOwnedCard = computed(() => ownedCardsForProfile.value[activeOwnedCardIndex.value] || ownedCardsForProfile.value[0]);
-const communityTotalPages = computed(() => Math.max(1, Math.ceil(communityRows.value.length / communityPageSize)));
+const filteredOwnedCardCatalog = computed(() => {
+  const query = ownedCardSearch.value.trim().toLowerCase();
+  const cards = ownedCardCatalog.value.filter((card) => !ownedCardSet.value.has(card.name));
+  if (!query) return cards.slice(0, 18);
+  return cards
+    .filter((card) =>
+      [card.name, card.issuer, card.type, card.specialty]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(query)
+    )
+    .slice(0, 18);
+});
+const filteredCommunityRows = computed(() => {
+  const query = communitySearchQuery.value.trim().toLowerCase();
+  return communityRows.value.filter((row) => {
+    const matchesTab = selectedCommunityTab.value === "전체" || row.tab === selectedCommunityTab.value;
+    if (!matchesTab) return false;
+    if (!query) return true;
+    return [row.title, row.content, row.author, row.tab, row.budget]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .includes(query);
+  });
+});
+const communityTotalPages = computed(() => Math.max(1, Math.ceil(filteredCommunityRows.value.length / communityPageSize)));
 const paginatedCommunityRows = computed(() => {
   const start = (communityPage.value - 1) * communityPageSize;
-  return communityRows.value.slice(start, start + communityPageSize);
+  return filteredCommunityRows.value.slice(start, start + communityPageSize);
 });
 const selectedCommunityPost = computed(() => communityRows.value.find((row) => row.id === selectedCommunityPostId.value));
 const canEditSelectedPost = computed(
@@ -516,7 +719,7 @@ const searchResults = computed(() => {
   }
 
   const pageIndex = [
-    { page: "home", title: "대시보드", keywords: ["홈", "home", "대시보드", "혜택", "인기", "이벤트"] },
+    { page: "home", title: "홈", keywords: ["홈", "home", "대시보드", "서비스", "소개", "혜택", "인기", "이벤트"] },
     { page: "map", title: "슬세권 분석", keywords: ["지도", "map", "슬세권", "상권", "지역", "소비", "분석", "ai"] },
     { page: "cards", title: "카드 대시보드", keywords: ["카드", "추천", "대시보드", "랭킹", "신용", "체크", "혜택"] },
     { page: "videos", title: "유튜브 검색", keywords: ["유튜브", "youtube", "영상", "검색", "카드 추천"] },
@@ -585,6 +788,15 @@ function normalizeCardType(cardType) {
   return "신용";
 }
 
+function resolveImageUrl(value) {
+  const src = String(value || "").trim().replace(/\\/g, "/");
+  if (!src) return "";
+  if (/^https?:\/\//i.test(src)) return src;
+  if (src.startsWith("/media/")) return `${BACKEND_ORIGIN}${src}`;
+  if (src.startsWith("media/")) return `${BACKEND_ORIGIN}/${src}`;
+  return src;
+}
+
 function backendReportCategory(category) {
   const mapping = {
     전체: null,
@@ -622,28 +834,26 @@ function normalizeRecommendationCard(card, index) {
     ranking_components: card.ranking_components || {},
     estimated_gross_benefit: card.estimated_gross_benefit,
     estimated_net_value: card.estimated_net_value,
+    image_url: resolveImageUrl(card.image_url || card.raw?.image_url || ""),
     application_url: card.application_url || card.apply_url || card.source_url,
     raw: card,
   };
 }
 
 function mapBackendSpending(spending = {}) {
-  const labels = {
-    cafe: "카페",
-    convenience: "편의점",
-    dining: "외식",
-    delivery: "배달",
-    mart: "마트",
-    shopping: "쇼핑",
-    etc: "기타",
-  };
-  const rows = Object.entries(spending)
-    .filter(([key]) => key !== "food")
-    .map(([key, amount]) => ({
-      name: labels[key] || key,
-      amount: Number(amount || 0),
+  const rows = [
+    { name: "카페", amount: Number(spending.cafe || 0), ratio: 0 },
+    { name: "편의점", amount: Number(spending.convenience || 0), ratio: 0 },
+    { name: "마트/슈퍼", amount: Number(spending.mart || 0), ratio: 0 },
+    {
+      name: "음식점/배달",
+      amount: Number(spending.dining || 0) + Number(spending.delivery || 0) + Number(spending.food || 0),
       ratio: 0,
-    }));
+    },
+    { name: "의류/소품", amount: Number(spending.shopping || 0), ratio: 0 },
+    { name: "교통", amount: Number(spending.transport || 0), ratio: 0 },
+    { name: "기타", amount: Number(spending.etc || 0), ratio: 0 },
+  ];
   const total = rows.reduce((sum, row) => sum + row.amount, 0);
   return rows.map((row) => ({
     ...row,
@@ -675,7 +885,6 @@ async function recordCardEvent(card, eventType, metadata = {}) {
 
 async function triggerRecalculation(category = selectedReportCategory.value) {
   const requestedCategory = typeof category === "string" ? category : selectedReportCategory.value;
-  if (!requireLogin()) return;
   recalculating.value = true;
   mapRecalcTick.value += 1;
   try {
@@ -687,7 +896,7 @@ async function triggerRecalculation(category = selectedReportCategory.value) {
     currentAreaId.value = mapSummary.area_id || currentAreaId.value;
     const selectedBackendCategory = backendReportCategory(requestedCategory);
     const result = await api.simulateCards({
-      user_id: currentUserId.value,
+      user_id: currentUserId.value || 1,
       area_id: currentAreaId.value,
       lat: selectedPoint.value.lat,
       lng: selectedPoint.value.lng,
@@ -736,6 +945,7 @@ function syncSelectedMapPoint(position, options = {}) {
   const lng = typeof position.getLng === "function" ? position.getLng() : position.lng;
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
   selectedPoint.value = { lat, lng };
+  if (options.mode) mapSelectionMode.value = options.mode;
   if (!window.kakao?.maps) return;
   const kakaoPosition = position.getLat ? position : new window.kakao.maps.LatLng(lat, lng);
   kakaoMarker?.setPosition(kakaoPosition);
@@ -752,6 +962,13 @@ function syncSelectedMapPoint(position, options = {}) {
 function selectMapCategory(category) {
   selectedCategory.value = category;
   updateNearbyPlaces();
+}
+
+function selectMapMode(mode) {
+  mapSelectionMode.value = mode;
+  if (mode === "map") {
+    centerKakaoMap();
+  }
 }
 
 function clearNearbyPlaces() {
@@ -890,16 +1107,17 @@ function updateNearbyPlaces() {
 function searchAddress() {
   const query = addressSearchQuery.value.trim();
   if (!query || !window.kakao?.maps?.services) return;
+  mapSelectionMode.value = "address";
   const geocoder = new window.kakao.maps.services.Geocoder();
   geocoder.addressSearch(query, (addressResults, addressStatus) => {
     if (addressStatus === window.kakao.maps.services.Status.OK && addressResults[0]) {
-      syncSelectedMapPoint({ lat: Number(addressResults[0].y), lng: Number(addressResults[0].x) }, { pan: true });
+      syncSelectedMapPoint({ lat: Number(addressResults[0].y), lng: Number(addressResults[0].x) }, { pan: true, mode: "address" });
       return;
     }
     const places = new window.kakao.maps.services.Places(kakaoMap);
     places.keywordSearch(query, (placeResults, placeStatus) => {
       if (placeStatus === window.kakao.maps.services.Status.OK && placeResults[0]) {
-        syncSelectedMapPoint({ lat: Number(placeResults[0].y), lng: Number(placeResults[0].x) }, { pan: true });
+        syncSelectedMapPoint({ lat: Number(placeResults[0].y), lng: Number(placeResults[0].x) }, { pan: true, mode: "address" });
       }
     });
   });
@@ -1030,6 +1248,83 @@ function moveOwnedCard(direction) {
   activeOwnedCardIndex.value = (activeOwnedCardIndex.value + direction + count) % count;
 }
 
+function orientPortraitCardImage(event) {
+  const image = event.currentTarget;
+  const isPortrait = image.naturalHeight > image.naturalWidth;
+  image.classList.toggle("portrait-card-image", isPortrait);
+  image.parentElement?.classList.toggle("portrait-card-frame", isPortrait);
+}
+
+async function loadOwnedCardCatalog() {
+  if (ownedCardCatalog.value.length || ownedCardCatalogLoading.value) return;
+  ownedCardCatalogLoading.value = true;
+  try {
+    const data = await api.financeCards("active");
+    ownedCardCatalog.value = (data.results || []).map((card, index) => normalizeRecommendationCard(card, index));
+  } finally {
+    ownedCardCatalogLoading.value = false;
+  }
+}
+
+async function openOwnedCardPicker() {
+  if (!requireLogin()) return;
+  ownedCardPickerOpen.value = !ownedCardPickerOpen.value;
+  if (ownedCardPickerOpen.value) {
+    await loadOwnedCardCatalog();
+  }
+}
+
+async function addOwnedCardFromDb(card) {
+  if (!requireLogin() || !card?.id) return;
+  const data = await api.saveOwnedCards({
+    user_id: currentUserId.value,
+    card_ids: [Number(card.id)],
+  });
+  if (data.profile) {
+    userProfile.value = { ...userProfile.value, ...data.profile };
+    authUser.value = data.profile;
+  } else if (!userProfile.value.ownedCards.includes(card.name)) {
+    userProfile.value.ownedCards = [...userProfile.value.ownedCards, card.name];
+  }
+  ownedCardSearch.value = "";
+  activeOwnedCardIndex.value = Math.max(0, ownedCardsForProfile.value.length - 1);
+}
+
+async function addManualOwnedCard() {
+  if (!requireLogin()) return;
+  const name = manualOwnedCardName.value.trim();
+  if (!name) return;
+  const data = await api.saveOwnedCards({
+    user_id: currentUserId.value,
+    manual_card_names: [name],
+  });
+  if (data.profile) {
+    userProfile.value = { ...userProfile.value, ...data.profile };
+    authUser.value = data.profile;
+  } else if (!userProfile.value.ownedCards.includes(name)) {
+    userProfile.value.ownedCards = [...userProfile.value.ownedCards, name];
+  }
+  manualOwnedCardName.value = "";
+  ownedCardSearch.value = "";
+  activeOwnedCardIndex.value = Math.max(0, ownedCardsForProfile.value.length - 1);
+}
+
+async function removeOwnedCard(card) {
+  if (!requireLogin() || !card?.id) return;
+  const data = await api.saveOwnedCards({
+    user_id: currentUserId.value,
+    remove_card_ids: [Number(card.id)],
+  });
+  if (data.profile) {
+    userProfile.value = { ...userProfile.value, ...data.profile };
+    authUser.value = data.profile;
+  } else {
+    userProfile.value.ownedCards = (userProfile.value.ownedCards || []).filter((name) => name !== card.name);
+    userProfile.value.ownedCardDetails = (userProfile.value.ownedCardDetails || []).filter((item) => item.id !== card.id);
+  }
+  activeOwnedCardIndex.value = Math.min(activeOwnedCardIndex.value, Math.max(0, ownedCardsForProfile.value.length - 1));
+}
+
 function moveCommunityPage(page) {
   communityPage.value = Math.min(Math.max(page, 1), communityTotalPages.value);
 }
@@ -1067,7 +1362,6 @@ function selectReportPopularCards() {
 }
 
 async function runUploadFlow() {
-  if (!requireLogin()) return;
   await nextTick();
   receiptUploadEl.value?.click();
 }
@@ -1081,16 +1375,33 @@ async function handleReceiptUpload(event) {
     const parsed = await api.parseImage(file);
     uploadProgress.value = 65;
     await api.saveUploadedReport({
-      user_id: currentUserId.value,
-      file_url: `local-vlm-upload://user-${currentUserId.value}/${encodeURIComponent(file.name)}`,
+      user_id: currentUserId.value || 1,
+      file_url: `local-vlm-upload://user-${currentUserId.value || 1}/${encodeURIComponent(file.name)}`,
       file_type: file.type || "application/octet-stream",
       parse_status: "normalized",
       parsed_payload: parsed,
     });
     uploadProgress.value = 90;
-    if (parsed.spending) {
-      spendRows.value = mapBackendSpending(parsed.spending);
+    const successfulAnalysisSources = new Set([
+      "vlm",
+      "local_sample_parser",
+      "local_pdf_statement_parser",
+    ]);
+    const isRealVlmResult =
+      successfulAnalysisSources.has(parsed.source) && parsed.vlm_status === "ok";
+    if (!isRealVlmResult) {
+      uploadState.value = "VLM 분석 실패";
+      uploadProgress.value = 0;
+      console.warn("[VLM upload ignored]", {
+        source: parsed.source,
+        vlm_status: parsed.vlm_status,
+        vlm_error_type: parsed.vlm_error_type,
+        vlm_error: parsed.vlm_error || parsed.fallback_reason,
+        vlm_request_debug: parsed.vlm_request_debug,
+      });
+      return;
     }
+    spendRows.value = mapBackendSpending(parsed.spending || {});
     uploadState.value = "자동 입력 완료";
     await triggerRecalculation();
     uploadProgress.value = 100;
@@ -1179,11 +1490,14 @@ async function loadCommunityPosts() {
 
 async function createPost() {
   if (!requireLogin()) return;
+  if (!communityPostTabs.includes(newPost.value.tab)) {
+    newPost.value.tab = "자유게시판";
+  }
   const data = await api.createPost(newPost.value);
   communityRows.value = data.items;
   communityPage.value = 1;
   navigate("community");
-  newPost.value = { title: "", content: "", budget: "200,000원", tab: selectedCommunityTab.value };
+  newPost.value = { title: "", content: "", budget: "200,000원", tab: selectedCommunityTab.value === "전체" ? "자유게시판" : selectedCommunityTab.value };
 }
 
 async function createComment(row) {
@@ -1398,10 +1712,21 @@ watch(ownedCardsForProfile, (cards) => {
 watch(active, async () => {
   await nextTick();
   if (active.value === "map") {
+    await loadOwnedCardCatalog();
     renderKakaoMap();
     centerKakaoMap();
   }
+  if (active.value === "cards") {
+    await loadOwnedCardCatalog();
+  }
+  if (active.value === "profile") {
+    await loadOwnedCardCatalog();
+  }
   renderCharts();
+});
+
+watch([selectedCommunityTab, communitySearchQuery], () => {
+  communityPage.value = 1;
 });
 
 onMounted(async () => {
@@ -1429,7 +1754,25 @@ onBeforeUnmount(() => {
   <div class="site-shell">
     <header class="site-header">
       <div class="header-inner">
-        <button class="brand" @click="navigate('home')"><span class="brand-dot" aria-hidden="true"></span><strong>SeulPick</strong></button>
+        <button class="brand" @click="navigate('home')">
+          <span class="brand-logo-box" aria-hidden="true">
+            <svg class="brand-logo" viewBox="0 0 92 42">
+              <defs>
+                <linearGradient id="brandLogoBlue" x1="11" y1="36" x2="69" y2="4" gradientUnits="userSpaceOnUse">
+                  <stop stop-color="#0f8f72" />
+                  <stop offset="1" stop-color="#0f5f72" />
+                </linearGradient>
+              </defs>
+              <path
+                class="brand-logo-mark"
+                d="M5 32.5H30.2C34.8 30.5 36.1 22.7 39 13.2C40.8 7.2 44.2 3.4 48.1 4.2C51 4.8 52.3 7.2 52.8 10.2C56.6 9.8 63.8 10.7 70 13.6C81 18.7 86.6 27 88 32.5H5Z"
+              />
+              <path class="brand-logo-swoosh" d="M47.7 9.5C44.3 15.8 42.9 23.8 36.6 31.2" />
+              <path class="brand-logo-check" d="M55.7 23.8L63.2 30.5L75.4 18.3" />
+            </svg>
+          </span>
+          <strong>SeulPick</strong>
+        </button>
         <nav class="global-nav">
           <button v-for="page in pages" :key="page.id" :class="{ active: active === page.id }" @click="navigate(page.id)">{{ page.label }}</button>
         </nav>
@@ -1460,78 +1803,260 @@ onBeforeUnmount(() => {
 
     <main class="page-main">
       <section v-if="active === 'home'" class="home-page reveal-section">
-        <article class="home-hero">
-          <button class="home-arrow" @click="triggerRecalculation">‹</button>
-          <div>
-            <span>지금 신규 카드 만들면</span>
-            <h1>최대 7만원 혜택</h1>
-            <p>혜택 좋은 카드를 지금 만나보세요</p>
-            <button class="outline-button" @click="navigate('map')">자세히 보기</button>
+        <section class="home-intro-page">
+          <article class="home-intro-hero">
+            <div class="home-intro-copy">
+              <span class="home-intro-eyebrow">SEULPICK EXPLAINED</span>
+              <h1>
+                <span>카드는 많고,</span>
+                <span>혜택은 <b>복잡</b>하니까.</span>
+              </h1>
+              <p>
+                <span>SeulPick은 내가 어디에서, 무엇에, 얼마나 쓰는지를 함께 읽어</span>
+                <span>실제 생활권에 맞는 카드 추천 결과를 만듭니다.</span>
+              </p>
+            </div>
+            <div class="home-intro-orbit" aria-label="SeulPick 추천 흐름">
+              <strong>SeulPick</strong>
+              <span>소비패턴</span>
+              <span>생활권</span>
+              <span>Graph DB</span>
+              <span>Seul-Score</span>
+            </div>
+          </article>
+
+          <section class="home-intro-story">
+            <div class="home-intro-rail">
+              <article class="home-intro-step">
+                <span><b>1</b> CONSUMPTION</span>
+                <h2>나의 소비 패턴 파악</h2>
+                <p>영수증 이미지나 입력된 소비 내역을 카페, 편의점, 외식, 마트처럼 추천 코어가 계산할 수 있는 카테고리 데이터로 바꿉니다.</p>
+              </article>
+              <article class="home-intro-step">
+                <span><b>2</b> LOCATION</span>
+                <h2>생활권 파악</h2>
+                <p>지도에서 선택한 위치 주변의 카페, 편의점, 마트, 음식점 데이터를 수집해 실제로 쓸 가능성이 높은 혜택 카테고리를 찾습니다.</p>
+              </article>
+              <article class="home-intro-step">
+                <span><b>3</b> GRAPH DB</span>
+                <h2>지역과 카드를 관계로 연결</h2>
+                <p>Graph DB는 선택 지역의 상권 카테고리와 카드 혜택 카테고리를 연결해 추천 후보를 먼저 좁힙니다.</p>
+              </article>
+              <article class="home-intro-step">
+                <span><b>4</b> SEUL-SCORE</span>
+                <h2>설명가능한 계산</h2>
+                <p>예상 순혜택, 소비-혜택 적합도, 지역 생활권 적합도를 분리해서 계산하고 추천 이유를 확인할 수 있게 만듭니다.</p>
+              </article>
+              <article class="home-intro-step">
+                <span>TRY IT</span>
+                <h2>이제 직접 바꿔보세요.</h2>
+                <p>소비 유형, 지역, 반경을 바꾸면 오른쪽 시뮬레이터의 추천 카드, 후보 수, Seul-Score가 즉시 바뀝니다.</p>
+              </article>
+            </div>
+
+            <section class="home-intro-canvas" aria-label="SeulPick 단계형 시뮬레이터">
+              <div class="home-intro-controls">
+                <label>
+                  <span>소비 유형</span>
+                  <div>
+                    <button v-for="item in introSpendTypes" :key="item.id" :class="{ active: introSpend === item.id }" @click="introSpend = item.id">{{ item.label }}</button>
+                  </div>
+                </label>
+                <label>
+                  <span>지역</span>
+                  <div>
+                    <button v-for="item in introAreaTypes" :key="item.id" :class="{ active: introArea === item.id }" @click="introArea = item.id">{{ item.label }}</button>
+                  </div>
+                </label>
+                <label>
+                  <span>반경</span>
+                  <div>
+                    <button v-for="item in introRadiusOptions" :key="item.id" :class="{ active: introRadius === item.id }" @click="introRadius = item.id">{{ item.label }}</button>
+                  </div>
+                </label>
+              </div>
+
+              <div class="home-intro-simulator">
+                <article class="active">
+                  <span class="num">1</span>
+                  <small>CONSUMPTION</small>
+                  <h3>{{ introResult.spend.label }}</h3>
+                  <p>{{ introResult.spend.focus }} 소비 패턴을 추천 카테고리로 변환합니다.</p>
+                </article>
+                <article>
+                  <span class="num">2</span>
+                  <small>LOCATION</small>
+                  <h3>{{ introResult.area.label }}</h3>
+                  <p>{{ introResult.radius.label }} 반경의 {{ introResult.radius.stores }}개 상권 데이터를 읽습니다.</p>
+                </article>
+                <article>
+                  <span class="num">3</span>
+                  <small>GRAPH DB</small>
+                  <h3>{{ introResult.graphCandidates }}개 후보</h3>
+                  <p>{{ introResult.area.category }} 상권과 카드 혜택 약관을 관계로 연결합니다.</p>
+                </article>
+                <article class="result">
+                  <span class="num">4</span>
+                  <small>SEUL-SCORE</small>
+                  <h3>{{ introResult.score }}점</h3>
+                  <p>{{ introResult.spend.card }}를 최종 추천 카드로 계산합니다.</p>
+                </article>
+              </div>
+
+              <aside class="home-intro-summary">
+                <div class="home-intro-score">
+                  <span>Seul-Score</span>
+                  <strong>{{ introResult.score }}</strong>
+                </div>
+                <div class="home-intro-result-card">
+                  <small>추천 카드</small>
+                  <h3>{{ introResult.spend.card }}</h3>
+                  <p>예상 월 혜택 {{ currency(introResult.estimatedBenefit) }}원</p>
+                </div>
+                <div class="home-intro-meta">
+                  <span><b>{{ introResult.graphCandidates }}</b>Graph 후보</span>
+                  <span><b>{{ introResult.radius.label }}</b>분석 반경</span>
+                </div>
+                <p class="home-intro-reason">{{ introResult.reason }}</p>
+              </aside>
+            </section>
+          </section>
+
+          <section class="home-intro-final">
+            <span class="home-intro-eyebrow">SEULPICK SERVICE FLOW</span>
+            <h2>
+              <span>소비·위치 데이터와 카드 약관을</span>
+              <b>한 번에 연결</b>
+            </h2>
+            <div>
+              <strong>VLM 소비패턴</strong>
+              <i>+</i>
+              <strong>카카오 지도 상권</strong>
+              <i>+</i>
+              <strong>Graph DB 후보</strong>
+              <i>+</i>
+              <strong>Python 추천 코어</strong>
+            </div>
+            <button class="primary-button" @click="navigate('map')">추천 결과 확인하기</button>
+          </section>
+        </section>
+
+      </section>
+
+      <section v-if="active === 'service'" class="page-section service-page service-story-page reveal-section">
+        <article class="service-hero service-story-hero">
+          <div class="service-hero-copy">
+            <span>SEULPICK EXPLAINED</span>
+            <h1>카드는 많고, 혜택은 복잡하니까.</h1>
+            <p>
+              SeulPick은 내가 어디에서, 무엇에, 얼마나 쓰는지를 함께 읽어
+              실제 생활권에 맞는 카드 추천 결과를 만듭니다.
+            </p>
+            <div class="service-hero-actions">
+              <button class="primary-button" @click="navigate('map')">내 생활권 분석하기</button>
+              <button class="outline-button" @click="navigate('cards')">추천 카드 보기</button>
+            </div>
           </div>
-          <div class="hero-illustration" aria-hidden="true">
-            <div class="hero-card-shape"></div>
-            <div class="hero-card-shape back"></div>
-            <div class="gift-box"></div>
-            <div class="coin-mark">₩</div>
+          <div class="story-phone" aria-label="SeulPick 추천 화면 예시">
+            <div class="story-phone-top"></div>
+            <div class="story-card-stack">
+              <span>Seul-Score</span>
+              <strong>76.3</strong>
+              <small>KB국민 My WE:SH 카드</small>
+            </div>
+            <div class="story-phone-bars"><i></i><i></i><i></i></div>
           </div>
-          <button class="home-arrow right" @click="triggerRecalculation">›</button>
-          <div class="hero-dots"><i></i><i></i><i></i><i></i></div>
         </article>
 
-        <div class="home-action-grid">
-          <article class="home-action-card">
-            <div>
-              <h2>지도에서 분석하기</h2>
-              <p>지도에서 지역을 선택하고<br />혜택과 소비 데이터를 분석해요</p>
-            </div>
-            <div class="action-illustration map-art"></div>
-            <button class="outline-button full" @click="navigate('map')">지도 분석하기</button>
-          </article>
-          <article class="home-action-card">
-            <div>
-              <h2>소비 내역 업로드</h2>
-              <p>카드 사용 내역을<br />업로드하면 혜택을 분석해드려요</p>
-            </div>
-            <div class="action-illustration upload-art"></div>
-            <button class="outline-button full" @click="navigate('map'); runUploadFlow()">업로드하기</button>
-          </article>
-        </div>
+        <article class="story-section story-left">
+          <div class="story-copy">
+            <span>01 CONSUMPTION</span>
+            <h2>먼저, 소비패턴을 읽습니다.</h2>
+            <p>
+              영수증 이미지나 사용자가 입력한 소비 내역을 카페, 편의점, 외식, 마트처럼
+              추천 코어가 계산할 수 있는 카테고리 데이터로 바꿉니다.
+            </p>
+          </div>
+          <div class="story-visual spend-visual">
+            <div><b>카페</b><span style="height: 78%"></span><em>180K</em></div>
+            <div><b>외식</b><span style="height: 92%"></span><em>260K</em></div>
+            <div><b>마트</b><span style="height: 42%"></span><em>50K</em></div>
+            <div><b>편의점</b><span style="height: 54%"></span><em>70K</em></div>
+          </div>
+        </article>
 
-        <section class="home-section">
-          <div class="home-section-head">
-            <h2>6월! 최대 117만원 받기</h2>
-            <button @click="navigate('cards')">전체보기 ›</button>
+        <article class="story-section story-right">
+          <div class="story-copy">
+            <span>02 LOCATION</span>
+            <h2>그 다음, 내 생활권을 봅니다.</h2>
+            <p>
+              지도에서 선택한 위치 주변의 카페, 편의점, 마트, 음식점 데이터를 수집해
+              이 지역에서 실제로 쓸 가능성이 높은 혜택 카테고리를 찾습니다.
+            </p>
           </div>
-          <div class="popular-card-row">
-            <button v-for="card in liveCards.slice(0, 4)" :key="card.id" class="popular-card" @click="openDrawer(card)">
-              <span class="round-card-art"></span>
-              <strong>{{ card.name }}</strong>
-            </button>
-            <button v-for="card in topCards.slice(0, 2)" :key="card.name" class="popular-card" @click="openDrawer(card)">
-              <span class="round-card-art muted"></span>
-              <strong>{{ card.name }}</strong>
-            </button>
+          <div class="story-visual map-visual">
+            <i class="map-pin main"></i>
+            <i class="map-pin cafe"></i>
+            <i class="map-pin food"></i>
+            <i class="map-pin mart"></i>
+            <span class="map-radius"></span>
+            <b>강남역 반경 500m</b>
           </div>
-        </section>
+        </article>
 
-        <section class="home-section">
-          <div class="home-section-head">
-            <h2>지금 가장 인기 있는 이벤트 카드</h2>
+        <article class="story-section story-left">
+          <div class="story-copy">
+            <span>03 GRAPH DB</span>
+            <h2>지역과 카드를 관계로 연결합니다.</h2>
+            <p>
+              Graph DB는 선택 지역의 상권 카테고리와 카드 혜택 카테고리를 연결해
+              추천 후보를 먼저 좁힙니다. 최종 금액 계산은 여전히 Python 추천 코어가 담당합니다.
+            </p>
           </div>
-          <div class="event-card-row">
-            <article v-for="card in liveCards.slice(0, 4)" :key="card.id" class="event-card interactive" @mouseenter="hoveredCardId = card.id" @mouseleave="hoveredCardId = ''" @click="openDrawer(card)">
-              <div class="event-thumb"></div>
-              <b>{{ card.name }}</b>
-              <span>최대 {{ currency(card.liveSaving) }}원 혜택</span>
-            </article>
-            <article v-for="card in topCards.slice(0, 1)" :key="card.name" class="event-card interactive" @click="openDrawer(card)">
-              <div class="event-thumb pale"></div>
-              <b>{{ card.name }}</b>
-              <span>최대 {{ currency(card.saving) }}원 혜택</span>
-            </article>
+          <div class="story-visual graph-visual">
+            <b>Area</b>
+            <i></i>
+            <b>Store</b>
+            <i></i>
+            <b>Category</b>
+            <i></i>
+            <b>Benefit</b>
+            <i></i>
+            <b>Card</b>
           </div>
-        </section>
+        </article>
 
+        <article class="story-section story-right score-story">
+          <div class="story-copy">
+            <span>04 SEUL-SCORE</span>
+            <h2>마지막은 점수가 아니라, 설명 가능한 계산입니다.</h2>
+            <p>
+              예상 순혜택, 소비-혜택 적합도, 지역 생활권 적합도를 분리해서 계산하고
+              사용자가 왜 이 카드를 추천받았는지 확인할 수 있게 만듭니다.
+            </p>
+          </div>
+          <div class="story-visual score-formula">
+            <div><strong>60%</strong><span>예상 순혜택</span></div>
+            <div><strong>25%</strong><span>소비-혜택 적합도</span></div>
+            <div><strong>15%</strong><span>지역 생활권 적합도</span></div>
+            <p>Seul-Score = 76.3</p>
+          </div>
+        </article>
+
+        <article class="story-final">
+          <span>SEULPICK SERVICE FLOW</span>
+          <h2>소비 데이터, 위치 데이터, 카드 약관을 한 번에 연결합니다.</h2>
+          <div class="story-final-flow">
+            <b>VLM 소비패턴</b>
+            <i>+</i>
+            <b>카카오 지도 상권</b>
+            <i>+</i>
+            <b>Graph DB 후보</b>
+            <i>+</i>
+            <b>Python 추천 코어</b>
+          </div>
+          <button class="primary-button" @click="navigate('map')">추천 결과 확인하기</button>
+        </article>
       </section>
 
       <section v-if="active === 'map'" class="page-section reveal-section">
@@ -1544,9 +2069,29 @@ onBeforeUnmount(() => {
           <article class="section-panel map-panel-large">
             <div class="panel-head"><h2>지역 선택</h2><p>{{ recalculating ? "추천 재계산 중" : "지도 이동과 반경 변경을 감지합니다" }}</p></div>
             <div class="toolbar-row">
-              <div class="segmented"><button class="active">지도에서 선택</button><button>주소로 검색</button></div>
+              <div class="segmented">
+                <button
+                  type="button"
+                  :class="{ active: mapSelectionMode === 'map' }"
+                  @click="selectMapMode('map')"
+                >
+                  지도에서 선택
+                </button>
+                <button
+                  type="button"
+                  :class="{ active: mapSelectionMode === 'address' }"
+                  @click="selectMapMode('address')"
+                >
+                  주소로 검색
+                </button>
+              </div>
               <form class="field-input" @submit.prevent="searchAddress">
-                <input v-model="addressSearchQuery" placeholder="주소 또는 장소명을 입력하세요" />
+                <input
+                  v-model="addressSearchQuery"
+                  placeholder="주소 또는 장소명을 입력하세요"
+                  @focus="selectMapMode('address')"
+                  @input="selectMapMode('address')"
+                />
                 <button type="submit">검색</button>
               </form>
             </div>
@@ -1567,11 +2112,13 @@ onBeforeUnmount(() => {
             </div>
             <div class="range-row">
               <span>100m</span>
-              <input v-model.number="radius" type="range" min="300" max="900" step="100" />
-              <span>{{ radius }}m</span>
+              <input v-model.number="radius" type="range" min="100" max="400" step="100" />
+              <span>400m</span>
             </div>
             <p class="map-status-copy">{{ selectedCategory }} 기준 반경 {{ radius }}m 안의 장소 {{ nearbyPlaceCount }}개를 표시 중입니다.</p>
-            <button class="outline-button full" @click="triggerRecalculation">이 데이터로 확정</button>
+            <button class="outline-button full" :disabled="recalculating" @click="triggerRecalculation(selectedCategory)">
+              {{ recalculating ? "계산 중..." : "이 데이터로 확정" }}
+            </button>
           </article>
 
           <article class="section-panel">
@@ -1579,19 +2126,19 @@ onBeforeUnmount(() => {
             <p>가계부 또는 카드 캡처 이미지를 업로드하면 AI가 카테고리별 소비액을 자동으로 채워드립니다.</p>
             <button class="upload-zone" @click="runUploadFlow">
               <b>{{ uploadState }}</b>
-              <strong>이미지를 드래그하거나 클릭하여 업로드</strong>
-              <small>JPG, PNG, HEIC 파일 지원</small>
+              <strong>이미지나 PDF를 클릭하여 업로드</strong>
+              <small>JPG, PNG, WEBP, HEIC, PDF 파일 지원</small>
               <span class="progress"><i :style="{ width: `${uploadProgress}%` }"></i></span>
             </button>
             <input
               ref="receiptUploadEl"
               class="visually-hidden-input"
               type="file"
-              accept="image/jpeg,image/png,image/heic,image/heif"
+              accept="image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf"
               @change="handleReceiptUpload"
             />
             <div class="ai-table">
-              <small>AI 분석 예시 [예제]</small>
+              <small>AI 분석 결과</small>
               <div v-for="row in spendRows" :key="row.name"><span>{{ row.name }}</span><b>{{ currency(row.amount) }}원</b></div>
             </div>
             <button class="primary-button full" @click="triggerRecalculation">이 데이터로 적용하기</button>
@@ -1643,7 +2190,7 @@ onBeforeUnmount(() => {
           <div v-if="false" class="filter-row">
             <button v-for="filter in reportFilters" :key="filter" :class="{ active: selectedReportFilter === filter }" @click="selectedReportFilter = filter">{{ filter }}</button>
           </div>
-          <div class="report-category-row">
+          <div v-if="hasRecommendationReport" class="report-category-row">
             <button
               v-for="category in reportCategoryOptions"
               :key="category"
@@ -1654,7 +2201,7 @@ onBeforeUnmount(() => {
             </button>
             <button :class="{ active: showReportPopularCards }" @click="selectReportPopularCards">지역 인기카드</button>
           </div>
-          <div v-if="showReportPopularCards" class="report-popular-section">
+          <div v-if="hasRecommendationReport && showReportPopularCards" class="report-popular-section">
             <p class="report-popular-copy">해당 지역에서 많이 조회된 카드</p>
             <button
               v-for="(card, index) in reportPopularCards"
@@ -1663,12 +2210,14 @@ onBeforeUnmount(() => {
               @click="openDrawer(card)"
             >
               <span class="report-popular-rank">{{ index + 1 }}</span>
-              <span class="report-popular-thumb" :style="{ '--card-color': card.color || '#e7f1ef' }"></span>
+              <span class="report-popular-thumb" :style="{ '--card-color': card.color || '#e7f1ef' }">
+                <img v-if="card.image_url" :src="card.image_url" :alt="card.name" />
+              </span>
               <b>{{ card.name }}</b>
               <span class="report-popular-arrow">▾</span>
             </button>
           </div>
-          <div v-if="!showReportPopularCards" class="report-columns">
+          <div v-else-if="hasRecommendationReport" class="report-columns">
             <section v-for="group in reportGroups" :key="group.id" class="report-column">
               <h3>{{ group.badge }}</h3>
               <button class="report-arrow report-arrow-left" @click="moveReportCard(group, -1)">‹</button>
@@ -1681,14 +2230,20 @@ onBeforeUnmount(() => {
                 @click="openDrawer(card)"
               >
                 <div class="report-score-row">
+                  <span>추천 점수</span>
                   <strong>{{ card.score }}<small>점</small></strong>
                 </div>
-                <div class="report-card-visual" :class="{ green: group.id === 'check' }">
+                <div class="report-card-visual" :class="{ green: group.id === 'check', 'has-image': card.image_url }">
+                  <img v-if="card.image_url" class="card-product-image" :src="card.image_url" :alt="card.name" @load="orientPortraitCardImage" />
                   <small>SeulPick</small>
                   <b>{{ card.name }}</b>
                   <em>{{ card.type }}</em>
                   <i></i>
                   <span>•••• {{ card.number }}</span>
+                </div>
+                <div class="report-card-title-row">
+                  <strong>{{ card.name }}</strong>
+                  <span>{{ card.issuer }} · {{ card.specialty || card.type }}</span>
                 </div>
                 <p class="score-line">Seul-Score <b>{{ stars(card.score) }}</b></p>
                 <p class="graph-score-line">Graph rerank <b>{{ card.graph_rerank_score || "-" }}점</b></p>
@@ -1710,6 +2265,7 @@ onBeforeUnmount(() => {
               </div>
             </section>
           </div>
+          <div v-else class="report-empty-space" aria-hidden="true"></div>
         </article>
       </section>
 
@@ -1727,7 +2283,8 @@ onBeforeUnmount(() => {
         <div class="gorilla-card-list">
           <article v-for="card in filteredGorillaCards" :key="card.name" class="gorilla-card-item interactive" @click="openDrawer(card)">
             <div class="gorilla-card-art" :style="{ '--card-color': card.color }">
-              <span></span>
+              <img v-if="card.image_url" :src="card.image_url" :alt="card.name" />
+              <span v-else></span>
             </div>
             <div class="gorilla-card-body">
               <div class="gorilla-title-row">
@@ -1790,14 +2347,27 @@ onBeforeUnmount(() => {
         </div>
         <div class="filter-row"><button v-for="tab in communityTabs" :key="tab" :class="{ active: selectedCommunityTab === tab }" @click="selectedCommunityTab = tab">{{ tab }}</button></div>
         <article class="section-panel table-panel">
+          <div class="community-toolbar">
+            <input v-model="communitySearchQuery" placeholder="제목, 작성자, 내용으로 검색" />
+            <span>{{ filteredCommunityRows.length }}개 글</span>
+          </div>
           <table>
             <thead><tr><th>제목</th><th>작성자</th><th>작성일</th><th>조회</th><th>공감</th><th>예산</th></tr></thead>
             <tbody>
               <template v-for="row in paginatedCommunityRows" :key="row.title">
                 <tr class="interactive-row" @click="openCommunityPost(row)">
-                  <td>{{ row.title }}</td><td>{{ row.author }}</td><td>{{ row.time }}</td><td>{{ row.views }}</td><td><button class="ghost-button" @click.stop="row.likes += 1">{{ row.likes }}</button></td><td>{{ row.budget }}</td>
+                  <td>
+                    <span class="community-title-cell">
+                      <b>{{ row.title }}</b>
+                      <em>{{ row.tab || "자유게시판" }}</em>
+                    </span>
+                  </td>
+                  <td>{{ row.author }}</td><td>{{ row.time }}</td><td>{{ row.views }}</td><td><button class="ghost-button" @click.stop="row.likes += 1">{{ row.likes }}</button></td><td>{{ row.budget }}</td>
                 </tr>
               </template>
+              <tr v-if="!paginatedCommunityRows.length">
+                <td colspan="6" class="community-empty-row">검색 결과가 없습니다.</td>
+              </tr>
             </tbody>
           </table>
           <div class="community-bottom-bar">
@@ -1831,7 +2401,7 @@ onBeforeUnmount(() => {
             <label>
               게시판
               <select v-model="editPost.tab">
-                <option v-for="tab in communityTabs" :key="tab" :value="tab">{{ tab }}</option>
+                <option v-for="tab in communityPostTabs" :key="tab" :value="tab">{{ tab }}</option>
               </select>
             </label>
             <label>
@@ -1898,7 +2468,7 @@ onBeforeUnmount(() => {
             <label>
               게시판
               <select v-model="newPost.tab">
-                <option v-for="tab in communityTabs" :key="tab" :value="tab">{{ tab }}</option>
+                <option v-for="tab in communityPostTabs" :key="tab" :value="tab">{{ tab }}</option>
               </select>
             </label>
             <label>
@@ -1954,11 +2524,39 @@ onBeforeUnmount(() => {
             </div>
           </article>
           <article class="section-panel owned-card-panel">
-            <div class="panel-head"><h2>내 보유 카드</h2><p>{{ ownedCardsForProfile.length }}개 등록</p></div>
+            <div class="panel-head">
+              <div><h2>내 보유 카드</h2><p>{{ ownedCardsForProfile.length }}개 등록</p></div>
+              <button class="outline-button" @click="openOwnedCardPicker">보유카드 추가하기</button>
+            </div>
+            <div v-if="ownedCardPickerOpen" class="owned-card-picker">
+              <input v-model="ownedCardSearch" placeholder="카드명 또는 카드사로 검색" />
+              <div class="owned-card-search-list">
+                <button
+                  v-for="card in filteredOwnedCardCatalog"
+                  :key="card.id"
+                  type="button"
+                  @click="addOwnedCardFromDb(card)"
+                >
+                  <img v-if="card.image_url" :src="card.image_url" :alt="card.name" @load="orientPortraitCardImage" />
+                  <span>
+                    <b>{{ card.name }}</b>
+                    <small>{{ card.issuer || "카드사" }} · {{ card.type || "카드" }}</small>
+                  </span>
+                  <em>추가</em>
+                </button>
+                <p v-if="ownedCardCatalogLoading" class="empty-insight">카드 목록을 불러오는 중입니다.</p>
+                <p v-else-if="!filteredOwnedCardCatalog.length" class="empty-insight">검색 결과가 없습니다. 아래에서 수동으로 추가할 수 있습니다.</p>
+              </div>
+              <div class="manual-owned-card-row">
+                <input v-model="manualOwnedCardName" placeholder="DB에 없는 카드명 직접 입력" @keyup.enter="addManualOwnedCard" />
+                <button class="primary-button" @click="addManualOwnedCard">수동 추가</button>
+              </div>
+            </div>
             <div class="owned-card-carousel" v-if="activeOwnedCard">
               <button class="owned-card-arrow" :disabled="ownedCardsForProfile.length <= 1" @click="moveOwnedCard(-1)">‹</button>
               <article class="owned-card active-owned-card interactive" @click="openDrawer(activeOwnedCard)">
                 <div class="owned-card-visual">
+                  <img v-if="activeOwnedCard.image_url" :src="activeOwnedCard.image_url" :alt="activeOwnedCard.name" />
                   <small>SeulPick</small>
                   <b>{{ activeOwnedCard.name }}</b>
                   <span>{{ activeOwnedCard.issuer || "등록 카드" }}</span>
@@ -1968,10 +2566,12 @@ onBeforeUnmount(() => {
                   <p>{{ activeOwnedCard.issuer || "등록 카드" }} · {{ activeOwnedCard.type || "보유" }}</p>
                   <em>보유 카드</em>
                   <small>{{ activeOwnedCardIndex + 1 }} / {{ ownedCardsForProfile.length }}</small>
+                  <button class="remove-owned-card-button" @click.stop="removeOwnedCard(activeOwnedCard)">보유카드 제거</button>
                 </div>
               </article>
               <button class="owned-card-arrow" :disabled="ownedCardsForProfile.length <= 1" @click="moveOwnedCard(1)">›</button>
             </div>
+            <p v-else class="empty-insight">보유카드를 추가하면 이곳에 표시됩니다.</p>
             <div class="owned-card-dots" v-if="ownedCardsForProfile.length > 1">
               <button v-for="(_, index) in ownedCardsForProfile" :key="index" :class="{ active: activeOwnedCardIndex === index }" @click="activeOwnedCardIndex = index"></button>
             </div>
@@ -1994,7 +2594,13 @@ onBeforeUnmount(() => {
             </div>
             <div v-if="behaviorRecommendedCard" class="similar-user-card interactive" @click="openDrawer(behaviorRecommendedCard)">
               <div class="similar-card-art">
-                <span></span>
+                <img
+                  v-if="behaviorRecommendedCard.image_url"
+                  :src="behaviorRecommendedCard.image_url"
+                  :alt="behaviorRecommendedCard.name"
+                  @load="orientPortraitCardImage"
+                />
+                <span v-else></span>
               </div>
               <div class="similar-card-copy">
                 <small>유사 사용자 선택 1위</small>
@@ -2046,20 +2652,26 @@ onBeforeUnmount(() => {
       <span class="drawer-kicker">카드 상세 혜택</span>
       <div class="drawer-title-row">
         <h2>{{ drawerCard.name }}</h2>
+      </div>
+      <div class="drawer-meta-row">
+        <p>{{ drawerCard.issuer || "SeulPick" }} · {{ drawerCard.type || drawerCard.specialty || "추천 카드" }}</p>
         <button
           class="drawer-favorite-button"
           :class="{ active: isFavorite(drawerCard) }"
           :aria-label="isFavorite(drawerCard) ? '찜 해제' : '찜하기'"
+          :title="isFavorite(drawerCard) ? '찜 해제' : '찜하기'"
           @click="toggleFavorite(drawerCard)"
         >
-          <span></span>
-          찜
+          <span aria-hidden="true">{{ isFavorite(drawerCard) ? "♥" : "♡" }}</span>
+          <b>{{ isFavorite(drawerCard) ? "찜" : "찜하기" }}</b>
         </button>
       </div>
       <em v-if="isOwned(drawerCard.name)">보유 카드</em>
-      <p>{{ drawerCard.issuer || "SeulPick" }} · {{ drawerCard.type || drawerCard.specialty || "추천 카드" }}</p>
       <div v-if="drawerCard.benefitBadge" class="drawer-card-hero">
-        <div class="gorilla-card-art" :style="{ '--card-color': drawerCard.color || '#111827' }"><span></span></div>
+        <div class="gorilla-card-art" :style="{ '--card-color': drawerCard.color || '#111827' }">
+          <img v-if="drawerCard.image_url" :src="drawerCard.image_url" :alt="drawerCard.name" />
+          <span v-else></span>
+        </div>
         <div>
           <b class="benefit-badge">{{ drawerCard.benefitBadge }}</b>
           <p>{{ drawerDetailInfo.annualFee }}</p>

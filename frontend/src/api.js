@@ -94,14 +94,12 @@ function remove(path) {
 }
 
 export const api = {
-  config: () =>
-    Promise.resolve({
-      kakaoMapApiKey: import.meta.env.VITE_KAKAO_JAVASCRIPT_KEY || "",
-    }),
+  config: () => request("/config/"),
   health: () => request("/health/"),
   overview: () => request("/overview/"),
   places: (category = "전체") => request(`/places/?category=${encodeURIComponent(category)}`),
   recommendations: (spend) => request(`/recommendations/?spend=${spend}`),
+  financeCards: (status = "active") => request(`/finance/cards/?status=${encodeURIComponent(status)}`),
   videos: (query = "", category = "전체") =>
     request(`/videos/?query=${encodeURIComponent(query)}&category=${encodeURIComponent(category)}`),
   community: (tab = "전체", search = "") =>
@@ -122,6 +120,7 @@ export const api = {
     return upload("/hyperlocal/parse-image/", formData);
   },
   saveUploadedReport: (payload) => post("/users/reports/", payload),
+  saveOwnedCards: (payload) => post("/users/owned-cards/", payload),
   cardEvent: (payload) => post("/hyperlocal/card-events/", payload),
   areaCardPopularity: (payload) => post("/hyperlocal/area-card-popularity/", payload),
   analyze: (payload) => post("/ai/analyze/", payload),

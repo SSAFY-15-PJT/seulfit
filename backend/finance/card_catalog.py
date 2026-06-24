@@ -63,20 +63,23 @@ def _build_graph_signal_map(candidates):
     return normalized
 
 
-def card_product_to_recommendation_input(card):
+def card_image_url(card):
     primary_image = (
-        card.images.filter(
-            download_status=CrawlStatus.SUCCESS,
-            is_primary=True,
-        ).first()
+        card.images.filter(download_status=CrawlStatus.SUCCESS, is_primary=True).first()
         or card.images.filter(download_status=CrawlStatus.SUCCESS).first()
+        or card.images.filter(is_primary=True).first()
+        or card.images.first()
     )
     if primary_image and primary_image.local_path:
-        image_url = f"{settings.MEDIA_URL.rstrip('/')}/{primary_image.local_path}"
-    elif primary_image:
-        image_url = primary_image.source_url
-    else:
-        image_url = ""
+        local_path = str(primary_image.local_path).replace("\\", "/")
+        return f"{settings.MEDIA_URL.rstrip('/')}/{local_path}"
+    if primary_image:
+        return primary_image.source_url
+    return ""
+
+
+def card_product_to_recommendation_input(card):
+    image_url = card_image_url(card)
 
     benefits = [
         {

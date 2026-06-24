@@ -2,7 +2,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APIRequestFactory
 
-from finance.models import CardProduct, CardType, ParseStatus
+from finance.models import CardImage, CardProduct, CardType, CrawlStatus, ParseStatus
 
 from .models import (
     UserConsumptionProfile,
@@ -75,6 +75,43 @@ class ProfileViewTests(TestCase):
         self.assertEqual(
             response.data["consumption_profile"]["spending_json"]["dining"],
             183000,
+        )
+
+    def test_frontend_profile_includes_owned_card_details_with_image(self):
+        user = get_user_model().objects.create_user(
+            username="owned-detail-user",
+            email="owned-detail@example.com",
+            password="secret",
+        )
+        card = CardProduct.objects.create(
+            external_id="owned-detail-card",
+            issuer="Test Issuer",
+            provider="Test Issuer",
+            source_channel="test",
+            card_type=CardType.CREDIT,
+            name="Owned Detail Card",
+            source_url="https://example.com/owned-detail-card",
+            annual_fee=10000,
+            parse_status=ParseStatus.ACTIVE,
+            raw_text="test",
+        )
+        CardImage.objects.create(
+            card=card,
+            source_url="https://example.com/card.png",
+            download_status=CrawlStatus.PENDING,
+            is_primary=True,
+        )
+        UserOwnedCard.objects.create(user=user, card=card)
+
+        profile = ProfileView.as_view()(
+            APIRequestFactory().get("/api/v1/users/profile/")
+        )
+
+        # The demo fallback user resolver picks the first user when no user_id is supplied.
+        self.assertEqual(profile.data["ownedCardDetails"][0]["name"], "Owned Detail Card")
+        self.assertEqual(
+            profile.data["ownedCardDetails"][0]["image_url"],
+            "https://example.com/card.png",
         )
 
     def test_profile_post_creates_or_updates_profile(self):
@@ -150,6 +187,59 @@ class ProfileViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["created_count"], 1)
         self.assertEqual(user.owned_cards.count(), 1)
+
+    def test_owned_cards_post_accepts_manual_card_names(self):
+        user = get_user_model().objects.create_user(
+            username="manual-card-user",
+            email="manual-card@example.com",
+            password="secret",
+        )
+
+        request = APIRequestFactory().post(
+            "/api/v1/users/owned-cards/",
+            {"user_id": user.id, "manual_card_names": ["내 커스텀 카드"]},
+            format="json",
+        )
+        response = OwnedCardUpsertView.as_view()(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["created_count"], 1)
+        owned = user.owned_cards.select_related("card").get()
+        self.assertEqual(owned.card.name, "내 커스텀 카드")
+        self.assertEqual(owned.card.source_channel, "manual_user")
+        self.assertIn("내 커스텀 카드", response.data["profile"]["ownedCards"])
+
+    def test_owned_cards_post_removes_mappings(self):
+        user = get_user_model().objects.create_user(
+            username="remove-card-user",
+            email="remove-card@example.com",
+            password="secret",
+        )
+        card = CardProduct.objects.create(
+            external_id="remove-card-1",
+            issuer="Test",
+            provider="Test",
+            source_channel="test",
+            card_type=CardType.CREDIT,
+            name="Remove Card",
+            source_url="https://example.com/remove-card",
+            annual_fee=10000,
+            parse_status=ParseStatus.ACTIVE,
+            raw_text="test",
+        )
+        UserOwnedCard.objects.create(user=user, card=card)
+
+        request = APIRequestFactory().post(
+            "/api/v1/users/owned-cards/",
+            {"user_id": user.id, "remove_card_ids": [card.id]},
+            format="json",
+        )
+        response = OwnedCardUpsertView.as_view()(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["removed_count"], 1)
+        self.assertEqual(user.owned_cards.count(), 0)
+        self.assertNotIn("Remove Card", response.data["profile"]["ownedCards"])
 
     def test_consumption_profile_post_saves_json(self):
         user = get_user_model().objects.create_user(

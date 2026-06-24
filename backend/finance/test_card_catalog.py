@@ -10,8 +10,10 @@ from finance.card_catalog import (
 from finance.models import (
     BenefitRule,
     CardBenefitTier,
+    CardImage,
     CardProduct,
     CardType,
+    CrawlStatus,
     DiscountType,
     ParseStatus,
 )
@@ -64,6 +66,19 @@ class CardCatalogTests(TestCase):
             data["benefit_tiers"][0]["monthly_discount_limit"],
             20000,
         )
+
+    def test_pending_primary_image_is_used_as_display_fallback(self):
+        card = create_card()
+        CardImage.objects.create(
+            card=card,
+            source_url="https://example.com/card.png",
+            download_status=CrawlStatus.PENDING,
+            is_primary=True,
+        )
+
+        data = card_product_to_recommendation_input(card)
+
+        self.assertEqual(data["image_url"], "https://example.com/card.png")
 
     def test_display_only_conditions_are_exposed_for_frontend(self):
         card = create_card()

@@ -28,7 +28,9 @@ class HyundaiCardAdapter(BaseCardAdapter):
     def __init__(self, opener=None):
         if opener is None:
             context = ssl.create_default_context()
-            context.options |= ssl.OP_LEGACY_SERVER_CONNECT
+            legacy_connect = getattr(ssl, "OP_LEGACY_SERVER_CONNECT", 0)
+            if legacy_connect:
+                context.options |= legacy_connect
             opener = build_opener(HTTPSHandler(context=context)).open
         super().__init__(opener=opener)
 

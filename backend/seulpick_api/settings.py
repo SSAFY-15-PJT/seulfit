@@ -4,11 +4,27 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-load_dotenv(BASE_DIR / ".env")
+PROJECT_ROOT = BASE_DIR.parent
+load_dotenv(BASE_DIR / ".env", override=True)
+
+
+def env_bool(name, default=False):
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.lower() in {"1", "true", "yes", "on"}
+
+
+def env_list(name, default=None):
+    value = os.getenv(name, "")
+    if not value:
+        return default or []
+    return [item.strip() for item in value.split(",") if item.strip()]
+
 
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "dev-seulpick-secret-key")
-DEBUG = True
-ALLOWED_HOSTS = ["*"]
+DEBUG = env_bool("DJANGO_DEBUG", True)
+ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", ["*"] if DEBUG else [])
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -69,12 +85,24 @@ TIME_ZONE = "Asia/Seoul"
 USE_I18N = True
 USE_TZ = True
 
-STATIC_URL = "static/"
+STATIC_URL = "/static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
+STATICFILES_DIRS = [
+    PROJECT_ROOT / "frontend" / "dist" / "assets",
+] if (PROJECT_ROOT / "frontend" / "dist" / "assets").exists() else []
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 KAKAO_REST_API_KEY = os.getenv("KAKAO_REST_API_KEY") or os.getenv("KAKAO_API_KEY", "")
+KAKAO_JAVASCRIPT_KEY = (
+    os.getenv("KAKAO_JAVASCRIPT_KEY")
+    or os.getenv("KAKAOMAP_API_KEY")
+    or os.getenv("KAKAO_MAP_API_KEY", "")
+)
+KAKAOMAP_API_KEY = KAKAO_JAVASCRIPT_KEY
+YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "")
+GMS_KEY = os.getenv("GMS_KEY", "")
 VLM_API_URL = os.getenv("VLM_API_URL", "")
 VLM_API_KEY = os.getenv("VLM_API_KEY") or os.getenv("GMS_KEY", "")
 VLM_MODEL = os.getenv("VLM_MODEL", "")
@@ -86,14 +114,14 @@ NEO4J_DATABASE = os.getenv("NEO4J_DATABASE", "neo4j")
 NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "")
 
-CORS_ALLOWED_ORIGINS = [
+CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS", [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://localhost:5174",
     "http://127.0.0.1:5174",
-]
+])
 CORS_ALLOW_CREDENTIALS = True
-CSRF_TRUSTED_ORIGINS = CORS_ALLOWED_ORIGINS
+CSRF_TRUSTED_ORIGINS = env_list("CSRF_TRUSTED_ORIGINS", CORS_ALLOWED_ORIGINS)
 
 REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
