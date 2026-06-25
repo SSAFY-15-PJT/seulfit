@@ -1,5 +1,6 @@
 import base64
 import json
+from urllib.error import HTTPError
 import mimetypes
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -41,8 +42,17 @@ def _contains(value, query):
 
 def _youtube_get(path, params):
     url = f"https://www.googleapis.com/youtube/v3/{path}?{urlencode(params)}"
-    with urlopen(url, timeout=5) as response:
-        return json.loads(response.read().decode("utf-8"))
+    try:
+        with urlopen(url, timeout=5) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        try:
+            payload = json.loads(body)
+            message = payload.get("error", {}).get("message") or body
+        except json.JSONDecodeError:
+            message = body or str(exc)
+        raise RuntimeError(f"YouTube API {exc.code}: {message}") from exc
 
 
 def _format_view_count(value):
@@ -83,6 +93,10 @@ def _fallback_videos(query, category):
         videos = [video for video in videos if video["category"] == category]
     if query:
         videos = [video for video in videos if _contains(video["title"], query) or _contains(video["channel"], query)]
+    for video in videos:
+        search_query = query or video["title"].replace("[예제] ", "")
+        video["url"] = f"https://www.youtube.com/results?{urlencode({'search_query': search_query})}"
+        video["thumbnail"] = ""
     return videos
 
 
@@ -96,7 +110,7 @@ def _youtube_search(query, category):
             "key": settings.YOUTUBE_API_KEY,
             "part": "snippet",
             "type": "video",
-            "maxResults": 8,
+            "maxResults": 9,
             "order": "relevance",
             "regionCode": "KR",
             "q": search_query,
