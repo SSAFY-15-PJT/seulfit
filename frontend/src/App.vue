@@ -1786,7 +1786,7 @@ watch([selectedCommunityTab, communitySearchQuery], () => {
 });
 
 onMounted(async () => {
-  await Promise.all([loadVideos(), loadConfigAndProfile(), loadAuth(), loadCommunityPosts()]);
+  await Promise.all([loadVideos(), loadConfigAndProfile(), loadAuth(), loadCommunityPosts(), loadOwnedCardCatalog()]);
   await nextTick();
   renderKakaoMap();
   renderCharts();
